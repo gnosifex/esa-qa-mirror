@@ -1,0 +1,33 @@
+# Which Q&A sets to mirror. IDs are the portals' own facet values —
+# take them from the portal search URL after filtering manually in the browser.
+
+delay_seconds: 1.5
+
+# default_act_ref: fallback regulation reference ("YYYY/N") for the structured
+# legal_act fields when the portal exposes no legal-act string on the detail page.
+
+eba:
+  # EBA Single Rulebook Q&A facet "Legal act" (qa_legal_act[]).
+  # 20 = Regulation (EU) 2022/2554 (DORA Reg), 19 = Directive (EU) 2022/2556 (DORA
+  # amending directive). Banking-sector acts are EBA-only (no Joint Q&As!) — add
+  # them here when needed, e.g.: 32 = CRD (2013/36/EU), 33 = CRR (575/2013),
+  # 38 = PSD2, 31 = BRRD, 18 = MiCAR. Caution: CRR alone carries a very large
+  # corpus (years of Q&As) — expect a long first run.
+  legal_act_ids: [19, 20, 32]   # 32 = CRD (Directive 2013/36/EU)
+  default_act_ref: "2022/2554"
+  # The EBA search form has no status facet; listings have only shown finals in
+  # practice — this post-filter guarantees it (records with any other status are skipped).
+  require_status: "Final"
+
+eiopa:
+  # EIOPA search facets (f[N]=...). 489 = DORA regulation reference; Final answers only.
+  facets:
+    - "regulation_reference%3A489"
+    - "status%3AFinal"
+  default_act_ref: "2022/2554"
+
+esma:
+  # ESMA "final" Q&A search facet field_qa_level1_target_id. 20010 = DORA.
+  # ESMA detail pages expose no legal-act field — the default_act_ref fills it.
+  level1_ids: [20010]
+  default_act_ref: "2022/2554"
