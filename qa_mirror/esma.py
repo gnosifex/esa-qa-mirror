@@ -9,27 +9,24 @@ from __future__ import annotations
 
 import re
 
-from .common import Http, Record, html_to_text, soup
+from .common import Http, Record, html_to_text, iter_listing, soup
 
 BASE = "https://www.esma.europa.eu"
 
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
-    seen = set()
     facets = "&".join(
         f"field_qa_level1_target_id%5B{i}%5D={a}"
         for i, a in enumerate(params.get("level1_ids", []))
     )
-    for page in range(max_pages):
-        url = f"{BASE}/esma-qa-search-page/final?{facets}&page={page}"
-        html = http.get(url).text
-        links = set(re.findall(r'href="(/publications-data/questions-answers/\d+)"', html))
-        new = links - seen
-        if not new:
-            break
-        seen |= new
-        for link in sorted(new):
-            yield BASE + link
+    for link in iter_listing(
+        http,
+        lambda page: f"{BASE}/esma-qa-search-page/final?{facets}&page={page}",
+        r'href="(/publications-data/questions-answers/\d+)"',
+        max_pages,
+        "esma",
+    ):
+        yield BASE + link
 
 
 def _field(doc, name: str) -> str:

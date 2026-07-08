@@ -4,8 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -39,6 +41,9 @@ def soup(html: str) -> BeautifulSoup:
     return BeautifulSoup(html, "html.parser")
 
 
+_BLOCK_TAGS = ["p", "li", "h2", "h3", "h4", "td"]
+
+
 def html_to_text(node) -> str:
     """Element → readable plain text with paragraph breaks preserved."""
     if node is None:
@@ -48,8 +53,15 @@ def html_to_text(node) -> str:
     for br in node.find_all("br"):
         br.replace_with("\n")
     parts = []
-    blocks = node.find_all(["p", "li", "h2", "h3", "h4", "td"]) or [node]
+    blocks = node.find_all(_BLOCK_TAGS) or [node]
+    # find_all returns nested blocks (<li><p>…</p></li>, <td><p>…</p></td>) as
+    # parent AND child; emitting both duplicates the text. Keep only blocks with
+    # no ancestor in the result. Compare by identity — bs4's == compares content,
+    # which would false-match equal tags elsewhere in the document.
+    block_ids = {id(b) for b in blocks}
     for b in blocks:
+        if any(id(a) in block_ids for a in b.parents):
+            continue
         t = re.sub(r"\s+", " ", b.get_text(" ", strip=True))
         if t:
             prefix = "- " if b.name == "li" else ""
@@ -58,6 +70,37 @@ def html_to_text(node) -> str:
         t = re.sub(r"\s+", " ", node.get_text(" ", strip=True))
         return t
     return "\n\n".join(parts)
+
+
+def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
+    """Yield detail-page links from a 0-based paginated listing, in page order.
+
+    Stops on a page without any detail links, or after two consecutive pages
+    with no *new* links — a single stale page (e.g. only pinned/already-seen
+    entries) must not silently cut off the rest of the corpus. Warns when
+    max_pages is exhausted, since that also means possible truncation.
+    """
+    seen = set()
+    stale = 0
+    for page in range(max_pages):
+        html = http.get(page_url(page)).text
+        links = set(re.findall(href_re, html))
+        if not links:
+            return
+        new = links - seen
+        if not new:
+            stale += 1
+            if stale >= 2:
+                return
+            continue
+        stale = 0
+        seen |= new
+        yield from sorted(new)
+    print(
+        f"[{tag}] WARNING: pagination stopped at max_pages={max_pages} — "
+        "listing may be truncated",
+        file=sys.stderr,
+    )
 
 
 # Canonical labels per act reference — extend as you add acts to config.yaml.
@@ -83,6 +126,21 @@ _ACT_REF_RE = re.compile(
     r"\((?:EU|EG|EC)\)\s*(?:No\.?\s*)?(\d{1,4}/\d{1,4})"
     r"|(\d{4}/\d{1,4})(?=/(?:EU|EG|EC)\b)"
 )
+
+# Portal date styles seen so far: EBA "20/05/2024", ESMA/EIOPA "06 Dec 2024".
+_DATE_FORMATS = ("%d/%m/%Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%d", "%d.%m.%Y")
+
+
+def iso_date(value: str) -> str:
+    """Portal-verbatim date string → ISO "YYYY-MM-DD", or "" if unparseable."""
+    v = (value or "").strip()
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(v, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
 
 # Joint-Q&A-Register ID formats differ per legal act (DORA pads to three digits:
 # DORA003). Add act-specific rules here when mirroring further acts; the fallback
@@ -161,6 +219,10 @@ class Record:
         ]
         for k, v in sorted(self.dates.items()):
             fm.append(f"date_{k}: {y(v)}")
+            # Portal-verbatim value plus a normalized twin for sorting/filtering
+            # (Obsidian properties, search page). Raw value always kept.
+            if iso_date(v):
+                fm.append(f"date_{k}_iso: {y(iso_date(v))}")
         for k, v in sorted(self.extra.items()):
             fm.append(f"x_{k}: {y(v)}")
         fm += [
@@ -203,11 +265,18 @@ class Record:
         return hashlib.sha256(md.encode()).hexdigest()[:16]
 
 
+# state.json hash values get this prefix when the record vanished from the
+# portal listing: it can never equal a real content hash, so a reappearing
+# record is always treated as changed and rewritten (clearing the marker).
+DELISTED_HASH_PREFIX = "delisted:"
+
+
 class State:
     """Tracks known records for delta runs (state.json at repo root)."""
 
     def __init__(self, path: Path):
         self.path = path
+        self.root = path.parent
         self.data = {"records": {}}
         if path.exists():
             self.data = json.loads(path.read_text(encoding="utf-8"))
@@ -216,10 +285,19 @@ class State:
         return f"{rec.authority}:{rec.slug()}"
 
     def is_new_or_changed(self, rec: Record) -> bool:
-        return self.data["records"].get(self.key(rec)) != rec.content_hash()
+        if self.data["records"].get(self.key(rec)) != rec.content_hash():
+            return True
+        # A matching hash alone is not enough: if the file was deleted from
+        # data/, the record must be rewritten even though nothing changed.
+        return not record_path(self.root, rec).exists()
 
     def remember(self, rec: Record):
         self.data["records"][self.key(rec)] = rec.content_hash()
+
+    def mark_delisted(self, key: str):
+        cur = self.data["records"].get(key, "")
+        if not cur.startswith(DELISTED_HASH_PREFIX):
+            self.data["records"][key] = DELISTED_HASH_PREFIX + cur
 
     def save(self):
         self.path.write_text(
@@ -227,10 +305,40 @@ class State:
         )
 
 
-def write_record(root: Path, rec: Record) -> Path:
+def record_path(root: Path, rec: Record) -> Path:
     # Grouped by legal-act family, authority in the filename:
     # data/dora/eba-2024-7089.md
-    out = root / "data" / rec.act_family() / f"{rec.authority}-{rec.slug()}.md"
+    return root / "data" / rec.act_family() / f"{rec.authority}-{rec.slug()}.md"
+
+
+def write_record(root: Path, rec: Record) -> Path:
+    out = record_path(root, rec)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(rec.to_markdown(), encoding="utf-8")
     return out
+
+
+def mark_file_delisted(root: Path, key: str, date_iso: str) -> Path | None:
+    """Flag the record file for state key "authority:slug" as no longer listed.
+
+    The file is kept (a citation tool must not silently lose records) and gets
+    an `x_delisted: "YYYY-MM-DD"` frontmatter field instead. Returns the file
+    path if it was newly marked, None if already marked or not found.
+    """
+    authority, slug = key.split(":", 1)
+    for f in sorted((root / "data").glob(f"*/{authority}-{slug}.md")):
+        text = f.read_text(encoding="utf-8")
+        if re.search(r"^x_delisted: ", text, flags=re.M):
+            return None
+        new = re.sub(
+            r"^source_url: ",
+            f'x_delisted: "{date_iso}"\nsource_url: ',
+            text,
+            count=1,
+            flags=re.M,
+        )
+        if new == text:
+            return None
+        f.write_text(new, encoding="utf-8")
+        return f
+    return None
