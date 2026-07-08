@@ -61,5 +61,8 @@ esma:
   # Fallback discovery when the search keeps serving unfiltered responses:
   # walk the sequential detail-page IDs from here until id_scan_gap
   # consecutive IDs are missing. 2100 predates the first DORA Q&A (2103).
+  # The gap must exceed ESMA's dead zones — its ID space has runs of >50
+  # consecutive non-existent IDs between Q&A clusters, so a smaller gap ends
+  # the scan early and never reaches the higher DORA records (2248-2646).
   id_scan_start: 2100
-  id_scan_gap: 50
+  id_scan_gap: 300
