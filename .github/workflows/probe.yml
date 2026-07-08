@@ -1,10 +1,9 @@
 name: probe
 
-# Manual diagnostic: fetch the portal listing/detail pages exactly as the
-# mirror would and print what the Actions runner actually receives (status,
-# size, title, detail-link counts). Use when a mirror run delists or imports
-# implausibly — distinguishes portal changes from runner-specific responses
-# (bot detection, geo walls).
+# Manual diagnostics for the portal adapters. Use when a mirror run delists
+# or imports implausibly — distinguishes portal changes from runner-specific
+# responses (the 2026-07 portal migrations exposed cache nodes that randomly
+# ignore query strings; see qa_mirror/eiopa.py and qa_mirror/esma.py).
 
 on:
   workflow_dispatch: {}
@@ -28,156 +27,24 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
+      - run: python -m qa_mirror --authority eba --limit 5
 
+  # Raw looks at what the portals serve this runner.
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
     steps:
-      - name: EIOPA listing, DORA facet only (user-verified browser URL)
+      - name: EIOPA XLSX export (the listing source)
         run: |
-          url="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
-          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          echo "detail links:"
-          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -15 || echo "NONE"
-          echo "known out-of-scope IDs present (3568=RFR, 3077=SII → facet ignored):"
-          grep -c 'database/3568_en\|database/3077_en' page.html || true
-      - name: EIOPA items_per_page (avoid pagination entirely)
-        run: |
-          base="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
-          for ipp in "All" "200" "100"; do
-            echo "--- items_per_page=$ipp"
-            curl -sS -A "$UA" "$base&items_per_page=$ipp" -o i.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-            n=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' i.html | sort -u | wc -l)
-            dora=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*dora[^"]*"' i.html | sort -u | wc -l)
-            echo "unique detail links: $n (dora-slugs: $dora)"
-            grep -oE '[?&;]page=[0-9]+' i.html | sort -u | head -4 || true
-          done
-      - name: EIOPA pagination — verbatim pager URL, session cookies from base
-        run: |
-          base="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
-          echo "--- base page with cookie jar"
-          curl -sS -c jar.txt -A "$UA" "$base" -o b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          echo "cookies set by server:"; tail -6 jar.txt
-          echo "--- full page=1 pager hrefs in base page:"
-          grep -oE 'href="[^"]*page=1"' b.html | sort -u | head -4
-          pager=$(grep -oE 'href="[^"]*page=1"' b.html | head -1 | sed 's/href="//;s/"$//;s/&amp;/\&/g')
-          case "$pager" in http*) url="$pager";; /*) url="https://www.eiopa.europa.eu$pager";; \?*) url="https://www.eiopa.europa.eu/search-qas_en$pager";; *) url="$base&page=1";; esac
-          echo "--- verbatim pager URL: $url"
-          curl -sS -b jar.txt -e "$base" -A "$UA" "$url" -o p1.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' p1.html | sort -u | head -12 || echo "NONE"
-          echo "--- same URL without cookies/referer"
-          curl -sS -A "$UA" "$url" -o p2.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' p2.html | sort -u | head -12 || echo "NONE"
-      - name: EIOPA detail markup of a listed record
-        run: |
-          link=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | head -1 | sed 's/href="//;s/"//')
-          echo "fetching: $link"
-          curl -sS -A "$UA" "https://www.eiopa.europa.eu$link" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          echo "metadata labels found:"
-          grep -o -i 'question id\|regulation reference\|topic\|status\|date of submission' d.html | sort | uniq -c | head
-          echo "p>b metadata sample:"
-          grep -o '<p[^>]*>[^<]*:\s*<b>[^<]*</b>' d.html | head -8 || echo "no p>b metadata"
-          echo "headings:"
-          grep -o '<h[1-6][^>]*>[^<]\{1,80\}' d.html | head -10
-      - name: ESMA final endpoint with [] param style
-        run: |
-          url="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_level1_target_id%5B%5D=20010&page=0"
-          curl -sS -A "$UA" "$url" -o e1.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' e1.html | sort -u | head -20 || echo "NONE"
-      - name: ESMA all endpoint (user-verified browser URL) page 0 and 1
-        run: |
-          base="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
-          for p in 0 1; do
-            echo "--- page $p"
-            curl -sS -A "$UA" "$base&page=$p" -o e2.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-            grep -o 'href="/publications-data/questions-answers/[0-9]*"' e2.html | sort -u | head -25 || echo "NONE"
-          done
-      - name: ESMA with dummy cookie (CDN cache bypass) — determinism + pagination
-        run: |
-          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
-          for variant in "no-page-a" "no-page-b" "page1" "page2"; do
-            case "$variant" in
-              no-page-*) url="$base";;
-              page1) url="$base&page=1";;
-              page2) url="$base&page=2";;
-            esac
-            echo "--- $variant"
-            curl -sS -A "$UA" -H "Cookie: esa_qa_mirror=1" "$url" -o c.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-            grep -o 'href="/publications-data/questions-answers/[0-9]*"' c.html | sort -u | head -8 || echo "NONE"
-          done
-      - name: ESMA final tab, full exposed-form params, indexed facet, paged
-        run: |
-          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
-          for p in "" "&page=0" "&page=1"; do
-            echo "--- final params='$p'"
-            curl -sS -A "$UA" "$base$p" -o f.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-            grep -o 'href="/publications-data/questions-answers/[0-9]*"' f.html | sort -u | head -15 || echo "NONE"
-          done
-      - name: ESMA all tab page 2 (portal's own pager URL style)
-        run: |
-          url="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D=&page=2"
-          curl -sS -A "$UA" "$url" -o a2.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' a2.html | sort -u | head -15 || echo "NONE"
-      - name: ESMA results shell analysis (JS-rendered? other link scheme? AJAX endpoint?)
-        run: |
-          base="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
-          curl -sS -A "$UA" "$base" -o shell.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          echo "== all qa/question-ish hrefs:"
-          grep -oE 'href="[^"]*(qa|question)[^"]*"' shell.html | sort | uniq -c | sort -rn | head -25
-          echo "== drupal views config:"
-          grep -oE '"view_name":"[^"]*"|"view_display_id":"[^"]*"|"view_args":"[^"]*"|"view_path":"[^"]*"' shell.html | sort -u | head
-          grep -c 'views/ajax' shell.html || true
-          echo "== api-ish URLs in scripts:"
-          grep -oE '"(https?:)?//[^"]*(api|search|solr|elastic)[^"]*"' shell.html | sort -u | head -10
-          echo "== result-count markers:"
-          grep -oE '[0-9]+ (results|questions)' shell.html | head -3 || true
-          echo "== data attributes of the results container:"
-          grep -oE '<div[^>]*(view|search|result)[^>]*>' shell.html | head -8
-      - name: ESMA views/ajax replay attempt
-        run: |
-          grep -oE '"view_name":"[^"]*","view_display_id":"[^"]*"[^}]*' shell.html | head -2 > cfg.txt || true
-          cat cfg.txt
-          vn=$(grep -oE '"view_name":"[^"]*"' shell.html | head -1 | cut -d'"' -f4)
-          vd=$(grep -oE '"view_display_id":"[^"]*"' shell.html | head -1 | cut -d'"' -f4)
-          echo "view_name=$vn display=$vd"
-          if [ -n "$vn" ]; then
-            curl -sS -A "$UA" "https://www.esma.europa.eu/views/ajax" \
-              --data "view_name=$vn&view_display_id=$vd&field_qa_level1_target_id%5B%5D=20010&page=0" \
-              -H "X-Requested-With: XMLHttpRequest" -o ajax.json -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-            grep -o 'publications-data/questions-answers/[0-9]*' ajax.json | sort -u | head -20 || echo "no links in ajax response"
-          fi
-      - name: ESMA detail markup check (known record 2103)
-        run: |
-          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o e3.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          echo "details blocks: $(grep -c '<details' e3.html || true)"
-          grep -o 'additionalinfo' e3.html | head -1 || echo "no additionalinfo div"
-          grep -o 'Status:[^<]*' e3.html | head -2 || true
-      - name: EIOPA XLSX export (found by the user on the portal)
-        run: |
-          curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx?prefLang=en" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n" || true
+          curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
           file qa.xlsx
-          pip install -q openpyxl 2>/dev/null | tail -1 || true
-          python3 - <<'EOF'
-          import openpyxl
-          wb = openpyxl.load_workbook("qa.xlsx", read_only=True)
-          for ws in wb.worksheets:
-              print(f"sheet: {ws.title!r}, dims: {ws.calculate_dimension()}")
-          ws = wb.worksheets[0]
-          rows = ws.iter_rows(values_only=True)
-          header = next(rows)
-          print("columns:", [str(c)[:40] for c in header])
-          n = dora = 0
-          sample = []
-          for r in rows:
-              n += 1
-              joined = " | ".join(str(c)[:60] for c in r if c is not None)
-              if "2554" in joined or "DORA" in joined.upper():
-                  dora += 1
-                  if len(sample) < 2:
-                      sample.append(joined[:600])
-          print(f"data rows: {n}, DORA-ish rows: {dora}")
-          for s in sample:
-              print("SAMPLE:", s)
-          EOF
+      - name: ESMA listing (cookie bypass + full exposed-form params)
+        run: |
+          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
+          curl -sS -A "$UA" -H "Cookie: esa_qa_mirror=1" "$base" -o page.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          echo "detail links:"
+          grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -15 || echo "NONE"
+          echo "pager pages advertised:"
+          grep -oE '[?&;]page=[0-9]+' page.html | sort -u | head -8 || echo "none"
