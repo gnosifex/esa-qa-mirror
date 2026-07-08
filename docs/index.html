@@ -21,6 +21,7 @@
   .meta { font-size:.8rem; color:var(--muted); margin-bottom:.35rem; }
   .meta b { color:var(--fg); }
   .q { font-weight:600; margin:.15rem 0 .4rem; }
+  .label { font-size:.7rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:.5rem; }
   .a { font-size:.92rem; white-space:pre-line; }
   .a.clamp { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
   .more { font-size:.82rem; color:var(--accent); cursor:pointer; background:none; border:none; padding:0; }
@@ -35,7 +36,7 @@
 <h1>ESA Q&amp;A Search</h1>
 <div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD; weekly refresh) —
 <a href="https://github.com/gnosifex/esa-qa-mirror">source &amp; docs on GitHub</a>. No account needed.</div>
-<div class="notice"><b>Unofficial mirror — no guarantee, no liability</b> for accuracy, completeness or timeliness;
+<div class="notice"><b>Disclaimer — unofficial mirror, no guarantee, no liability</b> for accuracy, completeness or timeliness;
 conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
 the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
@@ -51,6 +52,8 @@ version prevails. Content © EBA / EIOPA / ESMA, reuse subject to their legal no
 <script>
 let R=[];
 const $=id=>document.getElementById(id);
+function toggleAns(id,btn){const el=document.getElementById(id);el.classList.toggle('clamp');
+  btn.textContent=el.classList.contains('clamp')?'show full answer ▾':'collapse answer ▴';}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function hl(s,terms){let e=esc(s);for(const t of terms){if(t.length<2)continue;
   e=e.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');}return e;}
@@ -70,9 +73,11 @@ function render(){
       <div class="meta"><b>${esc(r.authority.toUpperCase())} ${esc(r.qa_id)}</b>
         ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
         ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}</div>
+      <div class="label">Question</div>
       <div class="q">${hl(r.question.slice(0,400),terms)}${r.question.length>400?'…':''}</div>
+      <div class="label">Answer</div>
       <div class="a clamp" id="a${i}">${hl(r.answer,terms)}</div>
-      <button class="more" onclick="document.getElementById('a${i}').classList.toggle('clamp')">show full answer</button>
+      <button class="more" onclick="toggleAns('a${i}',this)">show full answer ▾</button>
       · <a href="${esc(r.source_url)}" rel="noopener">original at the authority</a>
     </div>`).join('')||'<div class="count">No matches.</div>';
 }
