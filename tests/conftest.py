@@ -20,7 +20,9 @@ class FakeHttp:
         self.calls.append(url)
         self.headers_sent.append(kw.get("headers") or {})
         if url not in self.pages:
-            raise requests.HTTPError(f"404 for {url}")
+            raise requests.HTTPError(
+                f"404 for {url}", response=SimpleNamespace(status_code=404)
+            )
         body = self.pages[url]
         if isinstance(body, bytes):
             return SimpleNamespace(text=body.decode("utf-8", "replace"), content=body)

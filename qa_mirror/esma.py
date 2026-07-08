@@ -19,14 +19,43 @@ Listing quirks (verified live 2026-07-08 after ESMA's portal migration):
 from __future__ import annotations
 
 import re
+import sys
+
+import requests
 
 from .common import Http, Record, html_to_text, iter_pager_listing, soup
 
 BASE = "https://www.esma.europa.eu"
 _CACHE_BYPASS = {"Cookie": "esa_qa_mirror=1"}
 
+# detail pages fetched during the ID scan, keyed by URL — fetch_record
+# consumes them so each page is downloaded once
+_page_cache: dict[str, str] = {}
+
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
+    """Detail URLs via the facet listing, falling back to a sequential ID scan.
+
+    The search endpoint intermittently serves unfiltered responses in windows
+    that can outlast even minutes of retrying (see iter_pager_listing). Detail
+    pages themselves are reliable and — since the portal migration — carry the
+    level-1 act, so a deterministic fallback exists: walk the sequential
+    numeric ID space and let the act/status post-filters sort the records.
+    Slower (one request per ID, most of them foreign acts skipped downstream),
+    but never wrong and never red.
+    """
+    yielded: set[str] = set()
+    try:
+        for url in _listing_urls(http, params, max_pages):
+            yielded.add(url)
+            yield url
+        return
+    except RuntimeError as exc:
+        print(f"[esma] {exc}; falling back to sequential ID scan", file=sys.stderr)
+    yield from _id_scan(http, params, yielded)
+
+
+def _listing_urls(http: Http, params: dict, max_pages: int):
     facets = "&".join(
         f"field_qa_level1_target_id%5B{i}%5D={a}"
         for i, a in enumerate(params.get("level1_ids", []))
@@ -51,6 +80,27 @@ def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
         yield BASE + link
 
 
+def _id_scan(http: Http, params: dict, yielded: set):
+    i = int(params.get("id_scan_start", 2100))
+    max_gap = int(params.get("id_scan_gap", 50))
+    gap = 0
+    while gap < max_gap:
+        url = f"{BASE}/publications-data/questions-answers/{i}"
+        i += 1
+        try:
+            html = http.get(url).text
+        except requests.HTTPError as exc:
+            # only a hard 404 counts as a hole in the ID space
+            if exc.response is not None and exc.response.status_code == 404:
+                gap += 1
+                continue
+            raise
+        gap = 0
+        _page_cache[url] = html
+        if url not in yielded:
+            yield url
+
+
 def _field(doc, name: str) -> str:
     node = doc.find(class_=re.compile(rf"field--name-{name}\b"))
     if not node:
@@ -60,7 +110,10 @@ def _field(doc, name: str) -> str:
 
 
 def fetch_record(http: Http, url: str) -> Record:
-    doc = soup(http.get(url).text)
+    html = _page_cache.pop(url, None)
+    if html is None:
+        html = http.get(url).text
+    doc = soup(html)
     rec = Record(authority="esma", qa_id=url.rsplit("/", 1)[-1], source_url=url)
     rec.topic = _field(doc, "field-qa-subject-matter")
     # Since the 2026 migration the level-1 act is exposed as field-qa-level1

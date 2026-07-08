@@ -21,20 +21,52 @@ DEFAULT_DELAY = 1.5  # seconds between requests — be polite
 
 
 class Http:
-    def __init__(self, delay: float = DEFAULT_DELAY):
+    # Transient failures (throttling, flaky origins, network blips) are retried
+    # here centrally with growing backoff so adapters only ever see hard
+    # errors. 4xx other than 429 (e.g. 404) raise immediately — they are
+    # signal, not noise.
+    RETRYABLE = (429, 500, 502, 503, 504)
+
+    def __init__(self, delay: float = DEFAULT_DELAY, retries: int = 3):
         self.session = requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.delay = delay
+        self.retries = retries
         self._last = 0.0
 
     def get(self, url: str, **kw) -> requests.Response:
-        wait = self.delay - (time.monotonic() - self._last)
-        if wait > 0:
-            time.sleep(wait)
-        resp = self.session.get(url, timeout=60, **kw)
-        self._last = time.monotonic()
-        resp.raise_for_status()
-        return resp
+        for attempt in range(self.retries + 1):
+            wait = self.delay - (time.monotonic() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                resp = self.session.get(url, timeout=60, **kw)
+                self._last = time.monotonic()
+                if resp.status_code in self.RETRYABLE and attempt < self.retries:
+                    backoff = min(
+                        300, int(resp.headers.get("Retry-After") or 0) or 15 * 2**attempt
+                    )
+                    print(
+                        f"[http] {resp.status_code} for {url} — retrying in {backoff}s",
+                        file=sys.stderr,
+                    )
+                    time.sleep(backoff)
+                    continue
+                resp.raise_for_status()
+                return resp
+            except requests.HTTPError:
+                raise
+            except requests.RequestException as exc:
+                self._last = time.monotonic()
+                if attempt >= self.retries:
+                    raise
+                backoff = 15 * 2**attempt
+                print(
+                    f"[http] {type(exc).__name__} for {url} — retrying in {backoff}s",
+                    file=sys.stderr,
+                )
+                time.sleep(backoff)
+        raise RuntimeError("unreachable")
 
 
 def soup(html: str) -> BeautifulSoup:

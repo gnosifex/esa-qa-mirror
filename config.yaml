@@ -52,8 +52,14 @@ esma:
   # Since the portal migration, detail pages expose the level-1 act
   # (field-qa-level1) — records are labeled from it, and require_act_ref is
   # a second guard against unfiltered listings on top of the facet-echo
-  # validation. default_act_ref only covers records without the field.
-  default_act_ref: "2022/2554"
+  # validation. Deliberately NO default_act_ref: the sequential-ID-scan
+  # fallback fetches records of all acts, and a default would mislabel any
+  # record lacking the act field as DORA.
   require_act_ref: "2022/2554"
   # keeps unanswered ("Question Published") entries out
   require_status: "Answer Published"
+  # Fallback discovery when the search keeps serving unfiltered responses:
+  # walk the sequential detail-page IDs from here until id_scan_gap
+  # consecutive IDs are missing. 2100 predates the first DORA Q&A (2103).
+  id_scan_start: 2100
+  id_scan_gap: 50

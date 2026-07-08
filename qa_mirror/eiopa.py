@@ -24,6 +24,8 @@ import io
 import re
 import sys
 
+import requests
+
 from .common import Http, Record, format_joint_id, html_to_text, soup
 
 BASE = "https://www.eiopa.europa.eu"
@@ -64,8 +66,14 @@ def _resolve_detail_url(http: Http, qid: str) -> str | None:
         url = f"{BASE}/qa-regulation/questions-and-answers-database/{slug}_en"
         try:
             html = http.get(url).text
-        except Exception:
-            continue
+        except requests.HTTPError as exc:
+            # Only a real 404 means "this candidate slug does not exist".
+            # Anything else (throttling, flaky origin) propagates and fails
+            # the listing — a run once treated a throttled streak as "page
+            # gone" and skipped 26 resolvable records.
+            if exc.response is not None and exc.response.status_code == 404:
+                continue
+            raise
         _page_cache[url] = html
         return url
     return None
