@@ -20,7 +20,6 @@
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
   .meta { font-size:.8rem; color:var(--muted); margin-bottom:.35rem; }
   .meta b { color:var(--fg); }
-  .q { font-weight:600; margin:.15rem 0 .4rem; white-space:pre-line; }
   .label { font-size:.7rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:.5rem; }
   .a { font-size:.92rem; white-space:pre-line; }
   .card:not(.open) .clampable { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
@@ -74,7 +73,7 @@ function render(){
         ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
         ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}</div>
       <div class="label">Question</div>
-      <div class="q clampable">${hl(r.question,terms)}</div>
+      <div class="a clampable">${hl(r.question,terms)}</div>
       ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,terms)}</div>`:''}
       <div class="label">Answer</div>
       <div class="a clampable">${hl(r.answer,terms)}</div>
