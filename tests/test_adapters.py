@@ -100,6 +100,40 @@ def test_eiopa_listing_from_xlsx_export(fixture_html):
     assert len(http.calls) == n_calls
 
 
+def test_eiopa_transient_failure_skips_row_then_raises(fixture_html):
+    import requests
+    from types import SimpleNamespace
+
+    xlsx = make_export_xlsx([
+        ["3308 - DORA221", "2025-03-28", "2025-04-01",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "3", "", "q", "", "a"],
+        ["3476 - DORA-280", "2025-05-01", "2025-05-02",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "5", "", "q", "", "a"],
+    ])
+    detail = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
+    good = f"{detail}/3308-dora221_en"
+    flaky = f"{detail}/3476-dora280_en"  # first candidate slug for 3476
+
+    class FlakyEiopa(FakeHttp):
+        def get(self, url, **kw):
+            if "3476" in url:
+                self.calls.append(url)
+                raise requests.HTTPError("503", response=SimpleNamespace(status_code=503))
+            return super().get(url, **kw)
+
+    http = FlakyEiopa({eiopa.EXPORT_URL: xlsx, good: fixture_html("eiopa_detail.html")})
+    gen = eiopa.list_detail_urls(http, {"require_act_ref": "2022/2554"})
+    # the reachable record is yielded before the failure aborts nothing...
+    assert next(gen) == good
+    # ...and the transient failure surfaces as a listing error at the end
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError, match="temporarily unreachable"):
+        list(gen)
+    assert flaky  # (name kept for clarity)
+
+
 def test_eiopa_slug_candidates():
     assert eiopa._slug_candidates("3308 - DORA221")[0] == "3308-dora221"
     assert "3476-dora-280" in eiopa._slug_candidates("3476 - DORA-280")
@@ -250,6 +284,54 @@ def test_esma_falls_back_to_id_scan_when_listing_stays_unfiltered(
     rec = esma.fetch_record(http, urls[0])
     assert rec.question
     assert len(http.calls) == n
+
+
+def test_esma_id_scan_transient_error_does_not_end_scan_but_goes_red(
+    monkeypatch, fixture_html
+):
+    import pytest as _pytest
+
+    from qa_mirror import common
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
+    base = esma_listing_base()
+    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
+    detail = f"{esma.BASE}/publications-data/questions-answers"
+
+    class ScanHttp(FlakyHttp):
+        def __init__(self):
+            super().__init__({base: [junk]})
+            self.live = {
+                f"{detail}/2101": fixture_html("esma_detail.html"),
+                f"{detail}/2105": fixture_html("esma_detail.html"),
+            }
+            self.flaky = f"{detail}/2103"  # a 503 in the middle of the scan
+
+        def get(self, url, **kw):
+            from types import SimpleNamespace
+
+            import requests
+            if url in self.live:
+                self.calls.append(url)
+                return SimpleNamespace(text=self.live[url])
+            if url == self.flaky:
+                self.calls.append(url)
+                raise requests.HTTPError("503", response=SimpleNamespace(status_code=503))
+            if url.startswith(detail):
+                self.calls.append(url)
+                raise requests.HTTPError("404", response=SimpleNamespace(status_code=404))
+            return super().get(url, **kw)
+
+    http = ScanHttp()
+    params = {"level1_ids": [20010], "id_scan_start": 2100, "id_scan_gap": 3}
+    gen = esma.list_detail_urls(http, params)
+    got = []
+    with _pytest.raises(RuntimeError, match="temporarily unreachable"):
+        for u in gen:
+            got.append(u)
+    # the 503 at 2103 did NOT count toward the gap or stop the scan — 2105 was
+    # still reached — but it does make the run go red at the end
+    assert got == [f"{detail}/2101", f"{detail}/2105"]
+    assert f"{detail}/2105" in http.calls
 
 
 def test_esma_fetch_record(fixture_html):
