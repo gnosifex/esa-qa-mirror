@@ -48,6 +48,65 @@ def test_eba_listing_pagination():
 
 # --- EIOPA ----------------------------------------------------------------------
 
+def make_export_xlsx(rows):
+    import io
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Question ID", "Submitted on", "Answered on", "Regulation Reference",
+               "QA Topic", "Article", "Template", "Question",
+               "Background of the question", "EIOPA Answer"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_eiopa_listing_from_xlsx_export(fixture_html):
+    xlsx = make_export_xlsx([
+        # post-migration ID style; slug uses the compact form (3308-dora221)
+        ["3308 - DORA221", "2025-03-28", "2025-04-01",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "3", "", "q", "", "a"],
+        # hyphenated slug variant (first candidate 404s, second resolves)
+        ["3476 - DORA-280", "2025-05-01", "2025-05-02",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "5", "", "q", "", "a"],
+        # foreign act — filtered out by require_act_ref, never fetched
+        ["3374", "2025-06-26", "2025-07-01",
+         "(EU) No 2015/35 - supplementing Dir 2009/138/EC (SII)",
+         "t", "15", "", "q", "", "a"],
+        # pre-migration entry whose page is gone — warned about, skipped
+        ["2787 - DORA 011", "2024-12-06", "2024-12-07",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "30", "", "q", "", "a"],
+    ])
+    detail = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
+    http = FakeHttp({
+        eiopa.EXPORT_URL: xlsx,
+        f"{detail}/3308-dora221_en": fixture_html("eiopa_detail.html"),
+        f"{detail}/3476-dora-280_en": fixture_html("eiopa_detail.html"),
+    })
+    urls = list(eiopa.list_detail_urls(http, {"require_act_ref": "2022/2554"}))
+    assert urls == [f"{detail}/3308-dora221_en", f"{detail}/3476-dora-280_en"]
+    assert not any("3374" in u for u in http.calls)  # foreign act never fetched
+    # resolution cached the pages: fetch_record must not re-download
+    n_calls = len(http.calls)
+    rec = eiopa.fetch_record(http, urls[0])
+    assert rec.qa_id == "2787 - DORA 011"  # from the fixture's metadata
+    assert len(http.calls) == n_calls
+
+
+def test_eiopa_slug_candidates():
+    assert eiopa._slug_candidates("3308 - DORA221")[0] == "3308-dora221"
+    assert "3476-dora-280" in eiopa._slug_candidates("3476 - DORA-280")
+    assert eiopa._slug_candidates("Dora 262 - 3419")[0] == "3419-dora262"
+    assert eiopa._slug_candidates("3374") == ["3374"]
+
+
 def test_eiopa_fetch_record(fixture_html):
     url = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database/2787_en"
     rec = eiopa.fetch_record(FakeHttp({url: fixture_html("eiopa_detail.html")}), url)

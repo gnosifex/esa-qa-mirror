@@ -31,18 +31,14 @@ eba:
   require_status: "Final"
 
 eiopa:
-  # EIOPA search facets (f[N]=...). 489 = DORA regulation reference.
-  # NOTE (2026-07-08): EIOPA migrated its Q&A search. The old status%3AFinal
-  # facet no longer exists — sending it made the portal ignore ALL facets and
-  # serve an unfiltered listing (which once mass-delisted the corpus, see the
-  # plausibility brake). Status is now enforced via the require_status
-  # post-filter instead; old pre-migration detail URLs return 404.
-  facets:
-    - "regulation_reference%3A489"
+  # The listing comes from EIOPA's official full-database XLSX export, filtered
+  # by require_act_ref against the "Regulation Reference" column — the HTML
+  # search is served by cache nodes that randomly ignore facet parameters since
+  # the 2026 portal migration (see qa_mirror/eiopa.py for the full story), the
+  # export is deterministic. No facet IDs needed anymore.
   default_act_ref: "2022/2554"
   require_status: "Final"
-  # Post-filter: only records whose parsed regulation reference matches are
-  # mirrored — guards against listing filters silently breaking portal-side.
+  # Doubles as the export row filter and the per-record post-filter.
   require_act_ref: "2022/2554"
 
 esma:
