@@ -12,9 +12,11 @@ class FakeHttp:
     def __init__(self, pages: dict):
         self.pages = pages
         self.calls = []
+        self.headers_sent = []
 
-    def get(self, url: str):
+    def get(self, url: str, **kw):
         self.calls.append(url)
+        self.headers_sent.append(kw.get("headers") or {})
         return SimpleNamespace(text=self.pages[url])
 
 

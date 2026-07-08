@@ -48,9 +48,10 @@ eiopa:
 esma:
   # ESMA "final" Q&A search facet field_qa_level1_target_id. 20010 = DORA.
   # ESMA detail pages expose no legal-act field — the default_act_ref fills it.
-  # CAUTION (2026-07-08): the facet is currently ignored by the portal (the
-  # listing returns unrelated recent Q&As); known detail pages still exist.
-  # Re-derive the facet ID from a manual browser search when fixing.
+  # NOTE (2026-07-08): the listing sits behind a query-ignoring cache and an
+  # out-of-range page serves an unfiltered default listing — the adapter sends
+  # a cache-bypass cookie and follows only the portal's own pager links (see
+  # qa_mirror/esma.py for the full story).
   level1_ids: [20010]
   default_act_ref: "2022/2554"
   # ESMA exposes no act on detail pages, so no require_act_ref is possible;

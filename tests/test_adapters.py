@@ -84,6 +84,39 @@ def test_eiopa_joint_id_formats(fixture_html):
 
 # --- ESMA ----------------------------------------------------------------------
 
+def esma_listing_base():
+    return (
+        f"{esma.BASE}/esma-qa-search-page/final?field_qa_serial_value="
+        "&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010"
+        "&created%5Bmin%5D=&created%5Bmax%5D="
+    )
+
+
+def test_esma_listing_follows_only_advertised_pager_links():
+    base = esma_listing_base()
+    detail = '/publications-data/questions-answers/{}'
+    # page 0 advertises page 1; page 1 advertises page 0 back. A page=2 URL
+    # exists on the portal but serves an unfiltered default listing — the
+    # adapter must never request pages the pager does not advertise.
+    page0 = (f'<a href="{detail.format(2646)}">x</a>'
+             '<a href="?field_qa_serial_value=&amp;page=1">2</a>')
+    page1 = (f'<a href="{detail.format(2103)}">y</a>'
+             '<a href="?field_qa_serial_value=&amp;page=0">1</a>')
+    http = FakeHttp({base: page0, f"{base}&page=1": page1})
+    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    assert urls == [esma.BASE + detail.format(2646), esma.BASE + detail.format(2103)]
+    assert http.calls == [base, f"{base}&page=1"]  # nothing beyond the pager
+    # every listing request must carry the cache-bypass cookie
+    assert all("Cookie" in h for h in http.headers_sent)
+
+
+def test_esma_listing_single_page():
+    base = esma_listing_base()
+    http = FakeHttp({base: '<a href="/publications-data/questions-answers/2356">x</a>'})
+    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    assert urls == [f"{esma.BASE}/publications-data/questions-answers/2356"]
+
+
 def test_esma_fetch_record(fixture_html):
     url = f"{esma.BASE}/publications-data/questions-answers/2356"
     rec = esma.fetch_record(FakeHttp({url: fixture_html("esma_detail.html")}), url)

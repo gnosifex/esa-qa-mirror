@@ -1,17 +1,32 @@
 """ESMA Q&A adapter.
 
-Listing:  https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_level1_target_id[0]=<id>&page=N   (page is 0-based)
+Listing:  https://www.esma.europa.eu/esma-qa-search-page/final?...&field_qa_level1_target_id[0]=<id>&...&page=N
 Detail:   https://www.esma.europa.eu/publications-data/questions-answers/<id>
 Detail markup: field divs (field--name-field-qa-*), Status inside div.additionalinfo,
 question/answer inside <details> accordion blocks.
+
+Listing quirks (verified live 2026-07-08 after ESMA's portal migration):
+- The search sits behind a cache that ignores the query string for cookie-less
+  requests and then serves an unfiltered default page — non-deterministically.
+  Sending any cookie makes the cache pass the request through to Drupal, which
+  honors facets and pagination. Hence the static cache-bypass cookie below.
+- The exposed-form parameter set must be sent in full (empty fields included)
+  and the facet in indexed style, exactly like the portal's own pager links.
+- Requesting a page beyond the last one returns the unfiltered default listing
+  instead of an empty page — so only pages advertised by the pager are fetched
+  (a blind page++ loop would import unrelated recent Q&As).
 """
 from __future__ import annotations
 
 import re
+import sys
 
-from .common import Http, Record, html_to_text, iter_listing, soup
+from .common import Http, Record, html_to_text, soup
 
 BASE = "https://www.esma.europa.eu"
+_CACHE_BYPASS = {"Cookie": "esa_qa_mirror=1"}
+_LINK_RE = re.compile(r'href="(/publications-data/questions-answers/\d+)"')
+_PAGER_RE = re.compile(r"[?&;]page=(\d+)")
 
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
@@ -19,14 +34,35 @@ def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
         f"field_qa_level1_target_id%5B{i}%5D={a}"
         for i, a in enumerate(params.get("level1_ids", []))
     )
-    for link in iter_listing(
-        http,
-        lambda page: f"{BASE}/esma-qa-search-page/final?{facets}&page={page}",
-        r'href="(/publications-data/questions-answers/\d+)"',
-        max_pages,
-        "esma",
-    ):
-        yield BASE + link
+    base = (
+        f"{BASE}/esma-qa-search-page/final?field_qa_serial_value="
+        f"&combine_keywords_qa_search=&{facets}&created%5Bmin%5D=&created%5Bmax%5D="
+    )
+
+    def url_for(page: int) -> str:
+        return base if page == 0 else f"{base}&page={page}"
+
+    seen_links: set[str] = set()
+    known_pages = {0}
+    done_pages: set[int] = set()
+    while True:
+        remaining = sorted(known_pages - done_pages)
+        if not remaining:
+            return
+        page = remaining[0]
+        if page >= max_pages:
+            print(
+                f"[esma] WARNING: pager advertises page {page} beyond "
+                f"max_pages={max_pages} — listing may be truncated",
+                file=sys.stderr,
+            )
+            return
+        html = http.get(url_for(page), headers=_CACHE_BYPASS).text
+        done_pages.add(page)
+        known_pages |= {int(n) for n in _PAGER_RE.findall(html)}
+        for link in sorted(set(_LINK_RE.findall(html)) - seen_links):
+            seen_links.add(link)
+            yield BASE + link
 
 
 def _field(doc, name: str) -> str:
