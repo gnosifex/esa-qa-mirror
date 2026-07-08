@@ -9,6 +9,7 @@ article: "B_06.01.0010 and B_06.01.0020"
 topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "18 Apr 2024"
+date_date_of_submission_iso: "2024-04-18"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora092-3076_en"
 retrieved_at: "2026-07-08T01:39:02+00:00"
 ---

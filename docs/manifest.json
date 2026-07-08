@@ -1,0 +1,24 @@
+{
+ "crd": {
+  "file": "records-crd.json",
+  "count": 96,
+  "acts": [
+   "CRD"
+  ],
+  "authorities": [
+   "eba"
+  ]
+ },
+ "dora": {
+  "file": "records-dora.json",
+  "count": 61,
+  "acts": [
+   "DORA"
+  ],
+  "authorities": [
+   "eba",
+   "eiopa",
+   "esma"
+  ]
+ }
+}
