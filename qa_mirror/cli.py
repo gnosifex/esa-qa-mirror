@@ -7,6 +7,7 @@ Default run is a delta: unchanged records are skipped when writing.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,25 @@ from . import common, eba, eiopa, esma
 from .common import Http, State, write_record
 
 ADAPTERS = {"eba": eba, "eiopa": eiopa, "esma": esma}
+
+
+def _write_step_summary(totals: dict):
+    """Mirror the run summary into the GitHub Actions job summary, if present."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    lines = [
+        "## Mirror run",
+        "",
+        "| authority | seen | written | delisted | errors |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for auth, t in totals.items():
+        lines.append(
+            f"| {auth} | {t['seen']} | {t['written']} | {t['delisted']} | {t['errors']} |"
+        )
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
 
 
 def main(argv=None) -> int:
@@ -42,11 +62,14 @@ def main(argv=None) -> int:
     state = State(root / "state.json")
 
     authorities = list(ADAPTERS) if args.authority == "all" else [args.authority]
+    today = datetime.now(timezone.utc).date().isoformat()
     totals = {}
     for auth in authorities:
         mod = ADAPTERS[auth]
         params = cfg.get(auth, {}) or {}
-        written = errors = n = 0
+        written = errors = delisted = n = 0
+        seen_keys = set()
+        listing_ok = True
         try:
             for url in mod.list_detail_urls(http, params):
                 if args.limit and n >= args.limit:
@@ -58,6 +81,7 @@ def main(argv=None) -> int:
                     if req and req.lower() not in rec.status.lower():
                         print(f"[{auth}] skip {rec.slug()} (status: {rec.status!r})")
                         continue
+                    seen_keys.add(state.key(rec))
                     rec.retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     if args.full or state.is_new_or_changed(rec):
                         write_record(root, rec)
@@ -70,15 +94,35 @@ def main(argv=None) -> int:
         except Exception as exc:  # one broken portal must not stop the others
             print(f"[{auth}] LISTING FAILED: {exc}", file=sys.stderr)
             errors += 1
-        totals[auth] = (n, written, errors)
+            listing_ok = False
+
+        # Known records that no longer appear in the listing are marked (never
+        # deleted — a citation tool must not silently lose records). Only safe
+        # to conclude "gone" from a complete, error-free pass: --limit truncates
+        # the listing, and a fetch error hides that record's key from seen_keys.
+        if listing_ok and errors == 0 and not args.limit:
+            for key in sorted(state.data["records"]):
+                if not key.startswith(f"{auth}:") or key in seen_keys:
+                    continue
+                path = common.mark_file_delisted(root, key, today)
+                if path:
+                    state.mark_delisted(key)
+                    delisted += 1
+                    print(f"[{auth}] delisted {key} → marked {path.relative_to(root)}")
+        totals[auth] = {"seen": n, "written": written, "errors": errors, "delisted": delisted}
 
     state.save()
     print("\nSummary:")
-    for auth, (n, written, errors) in totals.items():
-        print(f"  {auth}: {n} seen, {written} written, {errors} errors")
-    return 1 if any(e for _, _, e in totals.values()) and not any(
-        w for _, w, _ in totals.values()
-    ) else 0
+    for auth, t in totals.items():
+        print(
+            f"  {auth}: {t['seen']} seen, {t['written']} written, "
+            f"{t['delisted']} delisted, {t['errors']} errors"
+        )
+    _write_step_summary(totals)
+    # Any error → non-zero: a partially successful run must not look green, or
+    # a permanently broken adapter would go unnoticed while the others still
+    # write. Partial results are committed anyway (workflow decouples the steps).
+    return 1 if any(t["errors"] for t in totals.values()) else 0
 
 
 if __name__ == "__main__":

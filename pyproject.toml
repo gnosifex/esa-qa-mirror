@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# qa_mirror is not an installed package — put the repo root on sys.path so
+# `pytest` works regardless of how it is invoked (plain pytest lacks the
+# implicit cwd entry that `python -m pytest` adds).
+pythonpath = ["."]
+testpaths = ["tests"]

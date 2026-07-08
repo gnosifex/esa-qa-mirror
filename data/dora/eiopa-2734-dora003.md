@@ -9,6 +9,7 @@ article: "2(3)(Scope of application of DORA to alternative investment fund manag
 topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "10 Jul 2023"
+date_date_of_submission_iso: "2023-07-10"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2734-dora003_en"
 retrieved_at: "2026-07-08T01:39:10+00:00"
 ---

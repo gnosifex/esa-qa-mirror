@@ -9,6 +9,7 @@ article: "N/A"
 topic: "ICT risk management (DORA)"
 status: "Final"
 date_date_of_submission: "07 Aug 2023"
+date_date_of_submission_iso: "2023-08-07"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2750-dora006_en"
 retrieved_at: "2026-07-08T01:39:13+00:00"
 ---

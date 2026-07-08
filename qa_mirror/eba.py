@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .common import Http, Record, html_to_text, soup
+from .common import Http, Record, html_to_text, iter_listing, soup
 
 BASE = "https://www.eba.europa.eu"
 KNOWN_LABELS = {
@@ -31,18 +31,15 @@ EXCLUDED_LABEL_PARTS = ("submitter", "name of institution", "country of incorpor
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 200):
     """Yield detail URLs for the configured legal-act filter, all pages."""
-    seen = set()
-    for page in range(max_pages):
-        q = "&".join(f"qa_legal_act%5B%5D={a}" for a in params.get("legal_act_ids", []))
-        url = f"{BASE}/single-rule-book-qa/search?{q}&page={page}"
-        html = http.get(url).text
-        links = set(re.findall(r'href="(/single-rule-book-qa/qna/view/publicId/[^"]+)"', html))
-        new = links - seen
-        if not new:
-            break
-        seen |= new
-        for link in sorted(new):
-            yield BASE + link
+    q = "&".join(f"qa_legal_act%5B%5D={a}" for a in params.get("legal_act_ids", []))
+    for link in iter_listing(
+        http,
+        lambda page: f"{BASE}/single-rule-book-qa/search?{q}&page={page}",
+        r'href="(/single-rule-book-qa/qna/view/publicId/[^"]+)"',
+        max_pages,
+        "eba",
+    ):
+        yield BASE + link
 
 
 def fetch_record(http: Http, url: str) -> Record:

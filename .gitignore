@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 .obsidian/
+.DS_Store
+docs/records-*.json
+docs/manifest.json

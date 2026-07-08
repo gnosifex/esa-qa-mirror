@@ -15,7 +15,10 @@ pip install -r requirements.txt
 python -m qa_mirror                 # full delta run per config.yaml
 python -m qa_mirror --limit 5       # smoke test: max 5 records per authority
 python -m qa_mirror --authority eba # one portal only
+python -m qa_mirror.site            # rebuild the docs/ search index from data/
 ```
+
+The search index (`docs/records-*.json`, `docs/manifest.json`) is a build artifact derived from `data/` — it is gitignored and generated at deploy time by the `pages` workflow, so the corpus lives in the repo exactly once.
 
 Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dora/eba-2024-7089.md`) — grouped by legal act, with the basis act and its level-2 acts in one directory. `state.json` tracks content hashes so repeated runs only rewrite new or changed records (delta behaviour by default; `--full` rewrites everything). The `retrieved_at` timestamp is excluded from the change detection.
 
@@ -29,7 +32,7 @@ Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dor
 
 ## Using this mirror for research
 
-**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
+**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Search state lives in the URL (`?q=…&act=…&auth=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so filtered searches stay fast as the corpus grows. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
 
 With a (free) GitHub account, GitHub's code search also works:
 
@@ -53,7 +56,11 @@ Then run `python -m qa_mirror` once for the initial corpus.
 
 ## Scheduled runs
 
-`.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report.
+`.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report. Any adapter error turns the run red (the successful part is still committed); the per-authority counts land in the job summary.
+
+Each mirror run then calls `pages.yml`, which builds the search index from `data/` and deploys the search page as a GitHub Pages artifact (`pages.yml` also runs on relevant pushes to main). **One-time setup:** set the Pages source to "GitHub Actions" (repo Settings → Pages → Build and deployment → Source).
+
+**Removed Q&As are never deleted, only marked:** when a complete, error-free listing pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears at the portal, the record is rewritten and the marker cleared automatically.
 
 ## Record format
 
@@ -68,9 +75,12 @@ legal_act_raw: "Regulation (EU) No 2022/2554 (DORA Reg)"   # portal's verbatim s
 article: "28"
 topic: "ICT third-party risk management"
 status: "Final Q&A"
-date_submission_date: "20/05/2024"
+date_submission_date: "20/05/2024"            # portal-verbatim
+date_submission_date_iso: "2024-05-20"        # normalized twin, for sorting/filtering
 date_final_publishing_date: "08/08/2025"
+date_final_publishing_date_iso: "2025-08-08"
 x_…: portal-specific extras, kept verbatim
+x_delisted: "2026-07-08"              # only if the Q&A vanished from the portal listing
 source_url: "https://…"
 retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 ---
@@ -103,7 +113,10 @@ qa_mirror/              the tool (common.py + one adapter per authority + CLI)
 config.yaml             which Q&A sets to mirror
 data/<act-family>/      the mirrored records, authority in the filename (committed)
 state.json              delta-run state (committed)
-.github/workflows/      weekly mirror run
+tests/                  pytest suite (fixture HTML per portal + unit tests)
+docs/                   search page (index.html committed; JSON index generated at deploy)
+.github/workflows/      weekly mirror run (mirror.yml), search-site deploy (pages.yml),
+                        tests/lint (ci.yml)
 ```
 
 ## Joint Q&As, source of truth, deduplication

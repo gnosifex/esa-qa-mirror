@@ -9,6 +9,7 @@ article: "Article 6(1) ITS 2024/2956"
 topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "14 Feb 2024"
+date_date_of_submission_iso: "2024-02-14"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora039-2990_en"
 retrieved_at: "2026-07-08T01:39:00+00:00"
 ---

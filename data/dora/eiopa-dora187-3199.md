@@ -9,6 +9,7 @@ article: "28(3)"
 topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "06 Dec 2024"
+date_date_of_submission_iso: "2024-12-06"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora187-3199_en"
 retrieved_at: "2026-07-08T01:39:05+00:00"
 ---

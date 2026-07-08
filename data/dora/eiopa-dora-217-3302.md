@@ -9,6 +9,7 @@ article: ""
 topic: "Reporting Templates"
 status: "Final"
 date_date_of_submission: "24 Mar 2025"
+date_date_of_submission_iso: "2025-03-24"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-217-3302_en"
 retrieved_at: "2026-07-08T01:38:40+00:00"
 ---

@@ -49,14 +49,36 @@ the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 completeness or timeliness. Before any use or reliance, verify against the linked original; the authority's portal
 version prevails. Content © EBA / EIOPA / ESMA, reuse subject to their legal notices.</div>
 <script>
-let R=[];
+// Records are split per act family (records-<family>.json, see manifest.json)
+// and fetched lazily: an act-filtered search only loads that family's file,
+// and nothing is downloaded until the first search/filter interaction.
+let MANIFEST={},CACHE={},TOTAL=0,seq=0;
 const $=id=>document.getElementById(id);
 function toggleCard(btn){const card=btn.closest('.card');card.classList.toggle('open');
   btn.textContent=card.classList.contains('open')?'collapse ▴':'show full Q&A ▾';}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function hl(s,terms){let e=esc(s);for(const t of terms){if(t.length<2)continue;
   e=e.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');}return e;}
-function render(){
+const familyOf=act=>act.split('-')[0].toLowerCase().replace(/[^a-z0-9]+/g,'-');
+function neededFamilies(){const act=$('act').value;
+  if(act&&MANIFEST[familyOf(act)])return[familyOf(act)];
+  return Object.keys(MANIFEST);}
+function loadFamily(f){if(!CACHE[f])CACHE[f]=fetch(MANIFEST[f].file).then(r=>r.json());
+  return CACHE[f];}
+function syncUrl(){const p=new URLSearchParams();
+  if($('q').value.trim())p.set('q',$('q').value.trim());
+  if($('act').value)p.set('act',$('act').value);
+  if($('auth').value)p.set('auth',$('auth').value);
+  history.replaceState(null,'',p.toString()?'?'+p:location.pathname);}
+async function update(){
+  const my=++seq;syncUrl();
+  const fams=neededFamilies();
+  $('count').textContent='Loading…';
+  const R=(await Promise.all(fams.map(loadFamily))).flat();
+  if(my!==seq)return; // a newer interaction superseded this load
+  render(R);
+}
+function render(R){
   const terms=$('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const act=$('act').value, auth=$('auth').value;
   const hits=R.filter(r=>{
@@ -66,30 +88,41 @@ function render(){
     const hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '+r.question+' '+(r.background||'')+' '+r.answer).toLowerCase();
     return terms.every(t=>hay.includes(t));
   });
-  $('count').textContent=hits.length+' of '+R.length+' Q&As';
-  $('results').innerHTML=hits.slice(0,200).map((r,i)=>`
+  $('count').textContent=hits.length+' of '+R.length+' Q&As'
+    +(hits.length>200?' — showing the first 200, refine your search':'');
+  $('results').innerHTML=hits.slice(0,200).map(r=>`
     <div class="card">
       <div class="meta"><b>${esc(r.authority.toUpperCase())} ${esc(r.qa_id)}</b>
         ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
-        ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}</div>
+        ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}
+        ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
       <div class="label">Question</div>
       <div class="a clampable">${hl(r.question,terms)}</div>
       ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,terms)}</div>`:''}
       <div class="label">Answer</div>
       <div class="a clampable">${hl(r.answer,terms)}</div>
-      <button class="more" onclick="toggleCard(this)">show full Q&amp;A ▾</button>
+      <button class="more" onclick="toggleCard(this)">show full Q&A ▾</button>
       · <a href="${esc(r.source_url)}" rel="noopener">original at the authority</a>
     </div>`).join('')||'<div class="count">No matches.</div>';
 }
-fetch('records.json').then(r=>r.json()).then(d=>{
-  R=d;
-  for(const[id,key]of[['act','legal_act'],['auth','authority']]){
-    [...new Set(R.map(r=>r[key]).filter(Boolean))].sort().forEach(v=>{
+fetch('manifest.json').then(r=>r.json()).then(m=>{
+  MANIFEST=m;
+  const fams=Object.values(m);
+  TOTAL=fams.reduce((s,f)=>s+f.count,0);
+  for(const[id,vals]of[['act',fams.flatMap(f=>f.acts)],['auth',fams.flatMap(f=>f.authorities)]]){
+    [...new Set(vals)].sort().forEach(v=>{
       const o=document.createElement('option');o.value=v;o.textContent=v.toUpperCase();$(id).appendChild(o);});
   }
-  render();
+  const p=new URLSearchParams(location.search);
+  if(p.get('q'))$('q').value=p.get('q');
+  for(const id of['act','auth'])if(p.get(id)&&[...$(id).options].some(o=>o.value===p.get(id)))$(id).value=p.get(id);
+  if([...p.keys()].length){update();}
+  else{
+    $('count').textContent=TOTAL+' Q&As mirrored — search state is shareable via the URL';
+    $('results').innerHTML='<div class="count">Type to search or pick a filter — or <button class="more" onclick="update()">browse all '+TOTAL+' Q&amp;As</button>.</div>';
+  }
 });
-['q','act','auth'].forEach(id=>$(id).addEventListener('input',render));
+['q','act','auth'].forEach(id=>$(id).addEventListener('input',update));
 </script>
 </body>
 </html>

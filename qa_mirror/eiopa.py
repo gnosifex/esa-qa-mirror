@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from .common import Http, Record, format_joint_id, html_to_text, soup
+from .common import Http, Record, format_joint_id, html_to_text, iter_listing, soup
 
 BASE = "https://www.eiopa.europa.eu"
 LABELS = {
@@ -21,22 +21,17 @@ LABELS = {
 
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
-    seen = set()
     facets = "&".join(
         f"f%5B{i}%5D={f}" for i, f in enumerate(params.get("facets", []))
     )
-    for page in range(max_pages):
-        url = f"{BASE}/search-qas_en?{facets}&page={page}"
-        html = http.get(url).text
-        links = set(
-            re.findall(r'href="(/qa-regulation/questions-and-answers-database/[^"]+)"', html)
-        )
-        new = links - seen
-        if not new:
-            break
-        seen |= new
-        for link in sorted(new):
-            yield BASE + link
+    for link in iter_listing(
+        http,
+        lambda page: f"{BASE}/search-qas_en?{facets}&page={page}",
+        r'href="(/qa-regulation/questions-and-answers-database/[^"]+)"',
+        max_pages,
+        "eiopa",
+    ):
+        yield BASE + link
 
 
 def fetch_record(http: Http, url: str) -> Record:

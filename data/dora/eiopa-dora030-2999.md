@@ -9,6 +9,7 @@ article: "3(21)"
 topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "14 Feb 2024"
+date_date_of_submission_iso: "2024-02-14"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora030-2999_en"
 retrieved_at: "2026-07-08T01:38:57+00:00"
 ---
