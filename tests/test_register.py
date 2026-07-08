@@ -1,5 +1,8 @@
 import datetime
 
+import pytest
+import requests
+
 from qa_mirror import register
 
 
@@ -103,6 +106,45 @@ def test_discover_filters_act_status_authority_and_link(monkeypatch):
 
     # a non-matching act yields nothing
     assert register.discover(object(), "MiCA", {"Final"}, {"esma"}) == []
+
+
+class _Resp:
+    def __init__(self, status, body=None):
+        self.status_code = status
+        self._body = body
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+    def json(self):
+        return self._body
+
+
+def test_pbi_retries_transient_status_then_succeeds(monkeypatch):
+    # PowerBI 400s the first call, then serves the same request fine — the client
+    # must retry rather than fail the whole discovery (the live 2026-07-08 case).
+    slept, seq = [], [_Resp(400), _Resp(200, {"ok": True})]
+    monkeypatch.setattr(register.time, "sleep", slept.append)
+
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            return seq.pop(0)
+
+    out = register._pbi(Sess(), "/public/reports/x")
+    assert out == {"ok": True}
+    assert slept  # it backed off at least once
+
+
+def test_pbi_gives_up_after_retries(monkeypatch):
+    monkeypatch.setattr(register.time, "sleep", lambda s: None)
+
+    class Sess:
+        def get(self, url, headers=None, timeout=None):
+            return _Resp(503)
+
+    with pytest.raises(register.RegisterError):
+        register._pbi(Sess(), "/public/reports/x")
 
 
 def test_discover_skips_rows_without_http_link(monkeypatch):

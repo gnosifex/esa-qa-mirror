@@ -107,18 +107,18 @@ def html_to_text(node) -> str:
 def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
     """Yield detail-page links from a 0-based paginated listing, in page order.
 
-    Stops on a page without any detail links, or after two consecutive pages
-    with no *new* links — a single stale page (e.g. only pinned/already-seen
-    entries) must not silently cut off the rest of the corpus. Warns when
-    max_pages is exhausted, since that also means possible truncation.
+    Stops after two consecutive pages with no *new* links. A single barren page
+    — whether it carries no links at all (a transient empty response mid-listing)
+    or only already-seen ones (pinned/duplicate entries) — must not silently cut
+    off the rest of the corpus, so both cases are treated the same and only a
+    second consecutive one ends the walk. Warns when max_pages is exhausted,
+    since that also means possible truncation.
     """
     seen = set()
     stale = 0
     for page in range(max_pages):
         html = http.get(page_url(page)).text
         links = set(re.findall(href_re, html))
-        if not links:
-            return
         new = links - seen
         if not new:
             stale += 1

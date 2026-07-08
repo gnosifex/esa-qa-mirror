@@ -216,7 +216,7 @@ def page(*ids):
 
 
 def test_iter_listing_survives_one_stale_page():
-    http = FakeHttp({0: page("a", "b"), 1: page("a"), 2: page("c"), 3: ""})
+    http = FakeHttp({0: page("a", "b"), 1: page("a"), 2: page("c"), 3: "", 4: ""})
     got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
     assert got == ["/qa/a", "/qa/b", "/qa/c"]
 
@@ -228,10 +228,14 @@ def test_iter_listing_stops_after_two_stale_pages():
     assert http.calls == [0, 1, 2]
 
 
-def test_iter_listing_stops_on_page_without_links():
-    http = FakeHttp({0: page("a"), 1: "<html>no results</html>"})
+def test_iter_listing_survives_one_empty_page():
+    # A single empty page mid-listing is a transient blip, not the end: the walk
+    # must reach the record on the following page. Two consecutive empties stop it.
+    http = FakeHttp({0: page("a"), 1: "<html>no results</html>", 2: page("b"),
+                     3: "", 4: ""})
     got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
-    assert got == ["/qa/a"]
+    assert got == ["/qa/a", "/qa/b"]
+    assert http.calls == [0, 1, 2, 3, 4]
 
 
 def test_iter_listing_warns_when_max_pages_reached(capsys):

@@ -38,12 +38,19 @@ def test_eba_listing_pagination():
     def page_url(p):
         return f"{eba.BASE}/single-rule-book-qa/search?{q}&page={p}"
 
+    # Page 1 comes back empty mid-listing (a transient blip): the walk must NOT
+    # stop there — page 2 still carries a record. Only two consecutive barren
+    # pages (3 and 4) end it. This is the regression the fix guards against: a
+    # single empty page silently truncating the corpus.
     http = FakeHttp({
         page_url(0): f'<a href="{detail.format(1)}">x</a> <a href="{detail.format(2)}">y</a>',
         page_url(1): "<html>empty</html>",
+        page_url(2): f'<a href="{detail.format(3)}">z</a>',
+        page_url(3): "<html>empty</html>",
+        page_url(4): "<html>empty</html>",
     })
     urls = list(eba.list_detail_urls(http, {"legal_act_ids": [32]}))
-    assert urls == [eba.BASE + detail.format(1), eba.BASE + detail.format(2)]
+    assert urls == [eba.BASE + detail.format(n) for n in (1, 2, 3)]
 
 
 # --- EIOPA (detail parse for register-discovered joint Q&As) -------------------
