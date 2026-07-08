@@ -63,22 +63,6 @@ jobs:
             curl -sS -A "$UA" -H "Cookie: esa_qa_mirror=1" "$url" -o c.html -w "HTTP %{http_code}, %{size_download} bytes\n"
             grep -o 'href="/publications-data/questions-answers/[0-9]*"' c.html | sort -u | head -8 || echo "NONE"
           done
-        run: |
-          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
-          echo "--- first load (no page param, collect cookies)"
-          curl -sS -c jar.txt -A "$UA" "$base" -o p0.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' p0.html | sort -u | head -8
-          echo "--- page=1 WITH cookies + referer"
-          curl -sS -b jar.txt -e "$base" -A "$UA" "$base&page=1" -o p1.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' p1.html | sort -u | head -8 || echo "NONE"
-          echo "--- page=2 WITH cookies + referer"
-          curl -sS -b jar.txt -e "$base" -A "$UA" "$base&page=2" -o p2.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' p2.html | sort -u | head -8 || echo "NONE"
-          echo "--- page=1 with referer only (no cookies)"
-          curl -sS -e "$base" -A "$UA" "$base&page=1" -o p1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' p1b.html | sort -u | head -8 || echo "NONE"
-          echo "--- cookie jar contents:"
-          cat jar.txt | tail -5 || true
       - name: ESMA final tab, full exposed-form params, indexed facet, paged
         run: |
           base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
