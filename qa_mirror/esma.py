@@ -82,7 +82,9 @@ def _listing_urls(http: Http, params: dict, max_pages: int):
 
 def _id_scan(http: Http, params: dict, yielded: set):
     i = int(params.get("id_scan_start", 2100))
-    max_gap = int(params.get("id_scan_gap", 50))
+    # Large default: ESMA's ID space has dead zones of >50 consecutive missing
+    # IDs, so a small gap ends the scan before the higher DORA records.
+    max_gap = int(params.get("id_scan_gap", 300))
     gap = 0
     transient = 0
     while gap < max_gap:
