@@ -90,6 +90,24 @@ def test_joint_discovery_writes_then_delta(root, monkeypatch):
     assert state.data["records"]["eiopa:2622"]  # remembered
 
 
+def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
+    # A joint DORA row whose ESMA detail page tags the act as "MiCA" (a real
+    # DORA/MiCA VASP crossover) must still file under DORA — the register, not
+    # the receiving portal, classifies the joint act.
+    rows = [row("DORA138", "esma", "2364",
+                act="DORA - Regulation (EU) 2022/2554")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2364", source_url=url,
+                      legal_act_raw="MiCA", question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
+
+    assert run(root) == 0
+    assert (root / "data" / "dora" / "esma-2364.md").exists()
+    assert not (root / "data" / "unsorted" / "esma-2364.md").exists()
+
+
 def test_authority_filter_restricts_rows(root, monkeypatch):
     install(monkeypatch, default_rows())
     assert run(root, "--authority", "esma") == 0

@@ -87,10 +87,15 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             tag = f"{auth}:{act_name}"
             try:
                 rec = ADAPTERS[auth].fetch_record(http, row["link"])
-                # register metadata is authoritative for the shared/joint fields
+                # register metadata is authoritative for the shared/joint fields.
+                # The legal act especially: a joint Q&A can straddle acts (e.g. a
+                # DORA/MiCA VASP question), and the receiving portal may tag it by
+                # the *other* act — but the register placed it in this joint act's
+                # set, so its act string wins, keeping the record filed under the
+                # act we discovered it for rather than in data/unsorted/.
                 rec.joint_id = row["joint_id"] or rec.joint_id
                 rec.status = row["status"] or rec.status
-                rec.legal_act_raw = rec.legal_act_raw or row["legal_act_raw"]
+                rec.legal_act_raw = row["legal_act_raw"] or rec.legal_act_raw
                 rec.article = rec.article or row["article"]
                 rec.topic = rec.topic or row["topic"]
                 if row["answered_by"]:
