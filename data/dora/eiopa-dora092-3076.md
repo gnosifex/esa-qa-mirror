@@ -10,9 +10,8 @@ topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "18 Apr 2024"
 date_date_of_submission_iso: "2024-04-18"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora092-3076_en"
-retrieved_at: "2026-07-08T01:39:02+00:00"
+retrieved_at: "2026-07-08T12:36:10+00:00"
 ---
 
 # EIOPA Q&A DORA092 - 3076
@@ -22,6 +21,10 @@ retrieved_at: "2026-07-08T01:39:02+00:00"
 Could a same Function Identifier in field B_06.01.0010 be linked to multiple options/values (including the value ‘support functions’) in field B_06.01.0020?
 
 What is the meaning of ‘linked’ in the instruction of the field B_06.01.0020?
+
+## Background
+
+We noticed that it is difficult to interpret whether functions such as 'Compliance', 'Legal', 'Risk Management', 'Audit', 'Anti-Money-Laundering', etc. should be included as a) (general) support functions, or b) function assigned to each business line, or c) potentially even both in the template.
 
 ## Answer
 
