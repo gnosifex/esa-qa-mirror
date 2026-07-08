@@ -25,6 +25,19 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: EBA list_detail_urls — real code path, full facet-32 walk
+        run: |
+          python3 - <<'PY'
+          from qa_mirror import eba
+          from qa_mirror.common import Http
+          http = Http(delay=0.6)
+          urls = list(eba.list_detail_urls(http, {"legal_act_ids": [32]}))
+          ids = [u.rsplit("/", 1)[-1] for u in urls]
+          print("total:", len(ids))
+          print("first:", ids[:5])
+          print("last:", ids[-5:])
+          print("unique:", len(set(ids)))
+          PY
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
