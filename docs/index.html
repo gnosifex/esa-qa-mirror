@@ -26,6 +26,7 @@
   .more { font-size:.82rem; color:var(--accent); cursor:pointer; background:none; border:none; padding:0; }
   a { color:var(--accent); }
   .disclaimer { margin-top:2rem; font-size:.78rem; color:var(--muted); border-top:1px solid var(--border); padding-top:.8rem; }
+  .notice { font-size:.82rem; color:var(--fg); background:var(--card); border:1px solid var(--border); border-left:4px solid var(--accent); border-radius:8px; padding:.55rem .8rem; margin-bottom:1rem; }
   mark { background:#ffe58a; color:#000; border-radius:2px; }
   @media (prefers-color-scheme: dark){ mark { background:#8a6d00; color:#fff; } }
 </style>
@@ -34,6 +35,9 @@
 <h1>ESA Q&amp;A Search</h1>
 <div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD; weekly refresh) —
 <a href="https://github.com/gnosifex/esa-qa-mirror">source &amp; docs on GitHub</a>. No account needed.</div>
+<div class="notice"><b>Unofficial mirror — no guarantee, no liability</b> for accuracy, completeness or timeliness;
+conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
+the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
   <input id="q" type="search" placeholder="Search questions & answers… (e.g. subcontracting, register of information, Art. 28)" autofocus>
   <select id="act"><option value="">All acts</option></select>
