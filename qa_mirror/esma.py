@@ -19,14 +19,11 @@ Listing quirks (verified live 2026-07-08 after ESMA's portal migration):
 from __future__ import annotations
 
 import re
-import sys
 
-from .common import Http, Record, html_to_text, soup
+from .common import Http, Record, html_to_text, iter_pager_listing, soup
 
 BASE = "https://www.esma.europa.eu"
 _CACHE_BYPASS = {"Cookie": "esa_qa_mirror=1"}
-_LINK_RE = re.compile(r'href="(/publications-data/questions-answers/\d+)"')
-_PAGER_RE = re.compile(r"[?&;]page=(\d+)")
 
 
 def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
@@ -38,31 +35,15 @@ def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
         f"{BASE}/esma-qa-search-page/final?field_qa_serial_value="
         f"&combine_keywords_qa_search=&{facets}&created%5Bmin%5D=&created%5Bmax%5D="
     )
-
-    def url_for(page: int) -> str:
-        return base if page == 0 else f"{base}&page={page}"
-
-    seen_links: set[str] = set()
-    known_pages = {0}
-    done_pages: set[int] = set()
-    while True:
-        remaining = sorted(known_pages - done_pages)
-        if not remaining:
-            return
-        page = remaining[0]
-        if page >= max_pages:
-            print(
-                f"[esma] WARNING: pager advertises page {page} beyond "
-                f"max_pages={max_pages} — listing may be truncated",
-                file=sys.stderr,
-            )
-            return
-        html = http.get(url_for(page), headers=_CACHE_BYPASS).text
-        done_pages.add(page)
-        known_pages |= {int(n) for n in _PAGER_RE.findall(html)}
-        for link in sorted(set(_LINK_RE.findall(html)) - seen_links):
-            seen_links.add(link)
-            yield BASE + link
+    for link in iter_pager_listing(
+        http,
+        lambda page: base if page == 0 else f"{base}&page={page}",
+        r'href="(/publications-data/questions-answers/\d+)"',
+        max_pages,
+        "esma",
+        headers=_CACHE_BYPASS,
+    ):
+        yield BASE + link
 
 
 def _field(doc, name: str) -> str:
