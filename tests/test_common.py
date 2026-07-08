@@ -55,6 +55,16 @@ def test_iso_date_formats():
 
 # --- legal-act reference / joint id -----------------------------------------
 
+def test_finalize_no_default_fallback_for_unparseable_act_string():
+    # present-but-unparseable act string = foreign/unknown act — the default
+    # must not mislabel it (broken portal facets returned Solvency-II records
+    # on a DORA filter and they masqueraded as DORA via the fallback)
+    r = Record(authority="eiopa", qa_id="x", source_url="u",
+               legal_act_raw="Risk-Free Interest Rate - General questions").finalize(
+        {"default_act_ref": "2022/2554"})
+    assert (r.legal_act_ref, r.legal_act) == ("", "")
+
+
 def test_finalize_regulation_and_directive_styles():
     r = Record(authority="eba", qa_id="x", source_url="u",
                legal_act_raw="Regulation (EU) No 575/2013 (CRR)").finalize({})

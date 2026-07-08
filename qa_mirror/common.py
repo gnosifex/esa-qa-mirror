@@ -186,7 +186,16 @@ class Record:
         back to the authority's configured default (portals differ wildly here —
         ESMA e.g. exposes no legal-act field on the detail page at all)."""
         m = _ACT_REF_RE.search(self.legal_act_raw or "")
-        ref = (m.group(1) or m.group(2)) if m else str(params.get("default_act_ref", "") or "")
+        if m:
+            ref = m.group(1) or m.group(2)
+        elif not self.legal_act_raw:
+            ref = str(params.get("default_act_ref", "") or "")
+        else:
+            # A present-but-unparseable act string means a foreign or unknown
+            # act — mislabeling it with the configured default would smuggle
+            # out-of-scope records into the act's directory (seen live when a
+            # broken portal facet returned Solvency-II Q&As on a DORA filter).
+            ref = ""
         if ref:
             self.legal_act_ref = f"(EU) {ref}"
             self.legal_act = ACT_LABELS.get(ref, self.legal_act or "")

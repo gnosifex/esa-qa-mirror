@@ -62,6 +62,8 @@ Each mirror run then calls `pages.yml`, which builds the search index from `data
 
 **Removed Q&As are never deleted, only marked:** when a complete, error-free listing pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears at the portal, the record is rewritten and the marker cleared automatically.
 
+**Plausibility brake:** if more than `max(5, 20%)` of an authority's known records vanish from the listing at once, that is almost certainly a broken listing filter (portals have been observed to silently ignore facet parameters after migrations), not mass withdrawal — the run refuses to mark anything for that authority and exits red instead. `--allow-mass-delisting` overrides after manual verification. The `probe` workflow (manual dispatch) shows what the portal actually serves the runner when diagnosing such failures.
+
 ## Record format
 
 ```markdown

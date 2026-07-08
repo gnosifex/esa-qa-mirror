@@ -32,13 +32,26 @@ eba:
 
 eiopa:
   # EIOPA search facets (f[N]=...). 489 = DORA regulation reference; Final answers only.
+  # CAUTION (2026-07-08): EIOPA migrated its Q&A search — these facet values are
+  # currently ignored by the portal and the old detail URLs return 404. The
+  # require_act_ref post-filter keeps foreign records out until new facet IDs
+  # are configured (filter manually in the browser and copy them from the URL).
   facets:
     - "regulation_reference%3A489"
     - "status%3AFinal"
   default_act_ref: "2022/2554"
+  # Post-filter: only records whose parsed regulation reference matches are
+  # mirrored — guards against listing filters silently breaking portal-side.
+  require_act_ref: "2022/2554"
 
 esma:
   # ESMA "final" Q&A search facet field_qa_level1_target_id. 20010 = DORA.
   # ESMA detail pages expose no legal-act field — the default_act_ref fills it.
+  # CAUTION (2026-07-08): the facet is currently ignored by the portal (the
+  # listing returns unrelated recent Q&As); known detail pages still exist.
+  # Re-derive the facet ID from a manual browser search when fixing.
   level1_ids: [20010]
   default_act_ref: "2022/2554"
+  # ESMA exposes no act on detail pages, so no require_act_ref is possible;
+  # this at least keeps unanswered ("Question Published") entries out.
+  require_status: "Answer Published"
