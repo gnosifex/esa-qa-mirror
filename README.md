@@ -1,5 +1,7 @@
 # esa-qa-mirror
 
+**🔍 Search the corpus in your browser — no account needed: <https://gnosifex.github.io/esa-qa-mirror/>**
+
 Mirrors the **final Q&As of the three European Supervisory Authorities** (EBA Single Rulebook Q&A, EIOPA Q&A, ESMA Q&A) into one normalized, greppable Markdown repository — one file per Q&A with uniform YAML frontmatter (authority, legal act, article, topic, status, dates, source URL).
 
 **Why:** The three portals use different frontends, different formats and poor search. Supervisory interpretations that materially affect how an article must be read are effectively undiscoverable by web search. This tool turns the open, growing Q&A corpus into an enumerable local corpus you can search, diff and cite — and keeps it current via scheduled delta runs.
