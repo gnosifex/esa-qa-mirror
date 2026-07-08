@@ -4,7 +4,7 @@ Mirrors the **final Q&As of the three European Supervisory Authorities** (EBA Si
 
 **Why:** The three portals use different frontends, different formats and poor search. Supervisory interpretations that materially affect how an article must be read are effectively undiscoverable by web search. This tool turns the open, growing Q&A corpus into an enumerable local corpus you can search, diff and cite — and keeps it current via scheduled delta runs.
 
-Out of the box it mirrors the **DORA** Q&As of all three authorities and the **CRD** Q&As of the EBA (banking-sector acts have no Joint Q&As — they live solely in the EBA Single Rulebook tool); any other legal act is a one-line config change (facet IDs documented in `config.yaml`). Only **final** Q&As are mirrored — EIOPA/ESMA filter at listing level, EBA via the `require_status` post-filter.
+Out of the box it mirrors the **DORA** Q&As of all three authorities and the **CRD** Q&As of the EBA (banking-sector acts have no Joint Q&As — they live solely in the EBA Single Rulebook tool); any other legal act is a config-only change (see "Adding a new legal act"). Only **final** Q&As are mirrored — EIOPA/ESMA filter at listing level, EBA via the `require_status` post-filter.
 
 ## Quick start
 
@@ -24,6 +24,16 @@ Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dor
 - **EBA** `legal_act_ids`: values of `qa_legal_act[]` (e.g. `20` = DORA Regulation, `19` = DORA delegated/implementing acts).
 - **EIOPA** `facets`: the `f[N]=` values (e.g. `regulation_reference%3A489` = DORA, `status%3AFinal`).
 - **ESMA** `level1_ids`: values of `field_qa_level1_target_id` (e.g. `20010` = DORA).
+
+## Adding a new legal act
+
+Three steps, config only:
+
+1. **Find the facet IDs:** filter for the act manually in each portal's browser search and copy the ID from the resulting URL (EBA `qa_legal_act[]`, EIOPA `f[N]=regulation_reference:…`, ESMA `field_qa_level1_target_id`). Sectoral acts exist in one portal only — banking acts (CRD/CRR/PSD2…) solely at the EBA; only cross-sectoral acts (DORA, SFDR, PRIIPs, Securitisation…) are Joint ESAs Q&As across portals.
+2. **Add the IDs** to the authority sections in `config.yaml` (plus `default_act_ref` where a portal exposes no legal-act string).
+3. **Declare the act** under `acts:` in `config.yaml` (canonical `label` → target directory; for Joint acts also the register's `joint_id_format`). Without a label, records land in `data/unsorted/`.
+
+Then run `python -m qa_mirror` once for the initial corpus.
 
 ## Scheduled runs
 

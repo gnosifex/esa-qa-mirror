@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from . import eba, eiopa, esma
+from . import common, eba, eiopa, esma
 from .common import Http, State, write_record
 
 ADAPTERS = {"eba": eba, "eiopa": eiopa, "esma": esma}
@@ -29,6 +29,15 @@ def main(argv=None) -> int:
 
     root = Path(args.root).resolve()
     cfg = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
+    # Acts declared in config extend/override the built-in tables, so adding a
+    # new legal act never requires a code change.
+    for ref, spec in (cfg.get("acts") or {}).items():
+        if spec.get("label"):
+            common.ACT_LABELS[str(ref)] = str(spec["label"])
+        if spec.get("joint_id_format"):
+            common.JOINT_ID_FORMATS[str(spec.get("token", spec["label"]).upper())] = str(
+                spec["joint_id_format"]
+            )
     http = Http(delay=float(cfg.get("delay_seconds", 1.5)))
     state = State(root / "state.json")
 

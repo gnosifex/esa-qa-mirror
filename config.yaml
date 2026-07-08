@@ -6,6 +6,17 @@ delay_seconds: 1.5
 # default_act_ref: fallback regulation reference ("YYYY/N") for the structured
 # legal_act fields when the portal exposes no legal-act string on the detail page.
 
+# Optional: declare additional legal acts here (extends the built-in tables in
+# qa_mirror/common.py — no code change needed). Example:
+# acts:
+#   "575/2013":
+#     label: "CRR"                       # canonical label → directory data/crr/
+#   "1286/2014":
+#     label: "PRIIPS"
+#     joint_id_format: "{token}{num:03d}" # only for Joint-ESAs acts; check the
+#     token: "PRIIPS"                     # Joint Q&A Register for the ID style
+acts: {}
+
 eba:
   # EBA Single Rulebook Q&A facet "Legal act" (qa_legal_act[]).
   # 20 = Regulation (EU) 2022/2554 (DORA Reg), 19 = Directive (EU) 2022/2556 (DORA
