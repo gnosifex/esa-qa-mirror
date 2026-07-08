@@ -10,6 +10,7 @@ topic: "ICT third-party risk management (DORA)"
 status: "Final"
 date_date_of_submission: "20 May 2025"
 date_date_of_submission_iso: "2025-05-20"
+x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-242-3347_en"
 retrieved_at: "2026-07-08T01:38:41+00:00"
 ---
