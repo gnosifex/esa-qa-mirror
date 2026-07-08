@@ -36,6 +36,34 @@ jobs:
     env:
       UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
     steps:
+      - name: Joint Q&A Register PowerBI backend (conceptualschema 400 diagnosis)
+        run: |
+          pip install --quiet requests
+          python3 - <<'PY'
+          import requests
+          KEY = "e190a6e7-a75d-4543-b3e3-5d1a328e663e"
+          HOST = "wabi-west-europe-d-primary-api.analysis.windows.net"
+          H = {"X-PowerBI-ResourceKey": KEY, "User-Agent": "esa-qa-mirror-probe"}
+          s = requests.Session()
+          m = s.get(f"https://{HOST}/public/reports/{KEY}/modelsAndExploration"
+                    "?preferReadOnlySession=true", headers=H, timeout=60)
+          print("modelsAndExploration:", m.status_code)
+          mj = m.json()
+          model = mj["models"][0]
+          mid = model["id"]
+          rep = (mj.get("exploration") or {}).get("report", {}).get("objectId")
+          print("  modelId=%r (%s)  dbName=%r  reportId=%r"
+                % (mid, type(mid).__name__, model.get("dbName"), rep))
+          for attempt in range(3):
+              cs = s.post(f"https://{HOST}/public/reports/conceptualschema",
+                          headers=H,
+                          json={"userPreferredLocale": "en-US", "models": [mid]},
+                          timeout=60)
+              print(f"conceptualschema attempt {attempt}: {cs.status_code}")
+              print("  body:", cs.text[:1500])
+              if cs.status_code == 200:
+                  break
+          PY
       - name: EIOPA XLSX export (the listing source)
         run: |
           curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
