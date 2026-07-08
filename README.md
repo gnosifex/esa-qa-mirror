@@ -25,6 +25,18 @@ Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dor
 - **EIOPA** `facets`: the `f[N]=` values (e.g. `regulation_reference%3A489` = DORA, `status%3AFinal`).
 - **ESMA** `level1_ids`: values of `field_qa_level1_target_id` (e.g. `20010` = DORA).
 
+## Using this mirror for research
+
+No clone needed — GitHub's own search covers the full corpus:
+
+- **Web search:** type your term in the repo's search box, or use the global search with `repo:gnosifex/esa-qa-mirror <term>` — e.g. `repo:gnosifex/esa-qa-mirror "critical or important function"`. Every hit is one Q&A file with question, answer, article and source link.
+- **Filter by article/act:** search for frontmatter values, e.g. `repo:gnosifex/esa-qa-mirror "article: \"28\"" DORA`.
+- **What's new:** the commit history of `data/` *is* the change log — each weekly bot commit shows exactly which Q&As were added or revised.
+
+Locally it gets better: clone and `grep -rl 'subcontracting' data/dora/`, or open `data/` as an **Obsidian vault** — the frontmatter is deliberately single-line/Obsidian-compatible, so every record renders with filterable properties.
+
+Always verify against the linked source before relying on a record (see the per-record disclaimer).
+
 ## Adding a new legal act
 
 Three steps, config only:
