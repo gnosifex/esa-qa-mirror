@@ -73,7 +73,14 @@ def html_to_text(node) -> str:
 
 
 def iter_pager_listing(
-    http: Http, url_for, href_re: str, max_pages: int, tag: str, headers: dict | None = None
+    http: Http,
+    url_for,
+    href_re: str,
+    max_pages: int,
+    tag: str,
+    headers: dict | None = None,
+    validate=None,
+    retries: int = 4,
 ):
     """Yield detail links, following only pages the portal's own pager advertises.
 
@@ -83,6 +90,12 @@ def iter_pager_listing(
     page parameter on the first request can reset the view's filters.
     url_for(page) must therefore return the page-0 URL without a page
     parameter; further pages are discovered from pager hrefs in the HTML.
+
+    `validate(html) -> bool` guards against cache nodes that randomly ignore
+    the query string and serve an unfiltered page: an invalid response is
+    retried up to `retries` times, then the listing FAILS (RuntimeError) —
+    importing from an unfiltered page silently pollutes the corpus, so
+    fail-closed is the only safe reaction.
     """
     seen = set()
     known_pages = {0}
@@ -99,7 +112,20 @@ def iter_pager_listing(
                 file=sys.stderr,
             )
             return
-        html = http.get(url_for(page), headers=headers or {}).text
+        for attempt in range(retries + 1):
+            html = http.get(url_for(page), headers=headers or {}).text
+            if validate is None or validate(html):
+                break
+            print(
+                f"[{tag}] listing page {page} failed validation "
+                f"(attempt {attempt + 1}/{retries + 1}) — unfiltered cache response?",
+                file=sys.stderr,
+            )
+        else:
+            raise RuntimeError(
+                f"listing page {page} kept failing validation — the portal is "
+                "serving unfiltered responses; refusing to import from them"
+            )
         done_pages.add(page)
         known_pages |= {int(n) for n in re.findall(r"[?&;]page=(\d+)", html)}
         for link in sorted(set(re.findall(href_re, html)) - seen):

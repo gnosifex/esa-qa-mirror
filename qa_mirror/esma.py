@@ -42,6 +42,11 @@ def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
         max_pages,
         "esma",
         headers=_CACHE_BYPASS,
+        # A correctly filtered page echoes the facet in its pager/tab links;
+        # the unfiltered default page (served randomly by some cache nodes,
+        # cookie or not) does not — importing from it would pollute the corpus
+        # with unrelated recent Q&As, as happened twice before this guard.
+        validate=lambda html: facets in html,
     ):
         yield BASE + link
 
