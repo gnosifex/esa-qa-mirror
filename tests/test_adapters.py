@@ -151,6 +151,9 @@ def esma_listing_base():
     )
 
 
+FACET_ECHO = "field_qa_level1_target_id%5B0%5D=20010"
+
+
 def test_esma_listing_follows_only_advertised_pager_links():
     base = esma_listing_base()
     detail = '/publications-data/questions-answers/{}'
@@ -158,9 +161,9 @@ def test_esma_listing_follows_only_advertised_pager_links():
     # exists on the portal but serves an unfiltered default listing — the
     # adapter must never request pages the pager does not advertise.
     page0 = (f'<a href="{detail.format(2646)}">x</a>'
-             '<a href="?field_qa_serial_value=&amp;page=1">2</a>')
+             f'<a href="?{FACET_ECHO}&amp;page=1">2</a>')
     page1 = (f'<a href="{detail.format(2103)}">y</a>'
-             '<a href="?field_qa_serial_value=&amp;page=0">1</a>')
+             f'<a href="?{FACET_ECHO}&amp;page=0">1</a>')
     http = FakeHttp({base: page0, f"{base}&page=1": page1})
     urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
     assert urls == [esma.BASE + detail.format(2646), esma.BASE + detail.format(2103)]
@@ -171,9 +174,45 @@ def test_esma_listing_follows_only_advertised_pager_links():
 
 def test_esma_listing_single_page():
     base = esma_listing_base()
-    http = FakeHttp({base: '<a href="/publications-data/questions-answers/2356">x</a>'})
+    http = FakeHttp({base: f'<a href="/publications-data/questions-answers/2356">x</a>'
+                           f'<a href="?{FACET_ECHO}">self</a>'})
     urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
     assert urls == [f"{esma.BASE}/publications-data/questions-answers/2356"]
+
+
+class FlakyHttp:
+    """Serves a sequence of responses per URL — for cache-flakiness tests."""
+
+    def __init__(self, sequences: dict):
+        self.sequences = {k: list(v) for k, v in sequences.items()}
+        self.calls = []
+
+    def get(self, url, **kw):
+        self.calls.append(url)
+        seq = self.sequences[url]
+        from types import SimpleNamespace
+        return SimpleNamespace(text=seq.pop(0) if len(seq) > 1 else seq[0])
+
+
+def test_esma_listing_retries_unfiltered_cache_responses():
+    base = esma_listing_base()
+    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
+    good = (f'<a href="/publications-data/questions-answers/2646">x</a>'
+            f'<a href="?{FACET_ECHO}">self</a>')
+    http = FlakyHttp({base: [junk, junk, good]})
+    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    # junk responses are never yielded; the retry eventually got the real page
+    assert urls == [f"{esma.BASE}/publications-data/questions-answers/2646"]
+
+
+def test_esma_listing_fails_closed_on_persistent_unfiltered_responses():
+    import pytest as _pytest
+
+    base = esma_listing_base()
+    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
+    http = FlakyHttp({base: [junk]})
+    with _pytest.raises(RuntimeError, match="unfiltered"):
+        list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
 
 
 def test_esma_fetch_record(fixture_html):
