@@ -43,6 +43,17 @@ jobs:
           grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -15 || echo "NONE"
           echo "known out-of-scope IDs present (3568=RFR, 3077=SII → facet ignored):"
           grep -c 'database/3568_en\|database/3077_en' page.html || true
+      - name: EIOPA items_per_page (avoid pagination entirely)
+        run: |
+          base="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
+          for ipp in "All" "200" "100"; do
+            echo "--- items_per_page=$ipp"
+            curl -sS -A "$UA" "$base&items_per_page=$ipp" -o i.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+            n=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' i.html | sort -u | wc -l)
+            dora=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*dora[^"]*"' i.html | sort -u | wc -l)
+            echo "unique detail links: $n (dora-slugs: $dora)"
+            grep -oE '[?&;]page=[0-9]+' i.html | sort -u | head -4 || true
+          done
       - name: EIOPA pagination — verbatim pager URL, session cookies from base
         run: |
           base="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
