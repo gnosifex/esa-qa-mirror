@@ -27,7 +27,9 @@ Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dor
 
 ## Using this mirror for research
 
-No clone needed — GitHub's own search covers the full corpus:
+**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
+
+With a (free) GitHub account, GitHub's code search also works:
 
 - **Web search:** type your term in the repo's search box, or use the global search with `repo:gnosifex/esa-qa-mirror <term>` — e.g. `repo:gnosifex/esa-qa-mirror "critical or important function"`. Every hit is one Q&A file with question, answer, article and source link.
 - **Filter by article/act:** search for frontmatter values, e.g. `repo:gnosifex/esa-qa-mirror "article: \"28\"" DORA`.

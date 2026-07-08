@@ -20,11 +20,12 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements.txt
       - run: python -m qa_mirror
+      - run: python -m qa_mirror.site
       - name: Commit changes
         run: |
           git config user.name "esa-qa-mirror bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data state.json
+          git add data state.json docs
           git diff --cached --quiet && echo "no changes" && exit 0
           git commit -m "mirror: $(date -u +%F) delta"
           git push

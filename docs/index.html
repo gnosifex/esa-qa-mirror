@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESA Q&A Search — unofficial mirror (EBA · EIOPA · ESMA)</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --card:#f6f6f7; --accent:#0b5fff; --border:#ddd; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111; --fg:#eee; --muted:#9a9a9a; --card:#1c1c1f; --accent:#6ea8ff; --border:#333; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0 auto; max-width:900px; padding:1.5rem 1rem 4rem; font:16px/1.55 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:1.35rem; margin:0 0 .2rem; }
+  .sub { color:var(--muted); font-size:.86rem; margin-bottom:1rem; }
+  .controls { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+  input[type=search] { flex:1 1 260px; padding:.55rem .8rem; font-size:1rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
+  select { padding:.55rem .5rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
+  .count { color:var(--muted); font-size:.86rem; margin:.3rem 0 .8rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
+  .meta { font-size:.8rem; color:var(--muted); margin-bottom:.35rem; }
+  .meta b { color:var(--fg); }
+  .q { font-weight:600; margin:.15rem 0 .4rem; }
+  .a { font-size:.92rem; white-space:pre-line; }
+  .a.clamp { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+  .more { font-size:.82rem; color:var(--accent); cursor:pointer; background:none; border:none; padding:0; }
+  a { color:var(--accent); }
+  .disclaimer { margin-top:2rem; font-size:.78rem; color:var(--muted); border-top:1px solid var(--border); padding-top:.8rem; }
+  mark { background:#ffe58a; color:#000; border-radius:2px; }
+  @media (prefers-color-scheme: dark){ mark { background:#8a6d00; color:#fff; } }
+</style>
+</head>
+<body>
+<h1>ESA Q&amp;A Search</h1>
+<div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD; weekly refresh) —
+<a href="https://github.com/gnosifex/esa-qa-mirror">source &amp; docs on GitHub</a>. No account needed.</div>
+<div class="controls">
+  <input id="q" type="search" placeholder="Search questions & answers… (e.g. subcontracting, register of information, Art. 28)" autofocus>
+  <select id="act"><option value="">All acts</option></select>
+  <select id="auth"><option value="">All authorities</option></select>
+</div>
+<div class="count" id="count">Loading…</div>
+<div id="results"></div>
+<div class="disclaimer"><b>Disclaimer.</b> Unofficial, automatically generated mirror — no liability for accuracy,
+completeness or timeliness. Before any use or reliance, verify against the linked original; the authority's portal
+version prevails. Content © EBA / EIOPA / ESMA, reuse subject to their legal notices.</div>
+<script>
+let R=[];
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function hl(s,terms){let e=esc(s);for(const t of terms){if(t.length<2)continue;
+  e=e.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');}return e;}
+function render(){
+  const terms=$('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const act=$('act').value, auth=$('auth').value;
+  const hits=R.filter(r=>{
+    if(act&&r.legal_act!==act)return false;
+    if(auth&&r.authority!==auth)return false;
+    if(!terms.length)return true;
+    const hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '+r.question+' '+r.answer).toLowerCase();
+    return terms.every(t=>hay.includes(t));
+  });
+  $('count').textContent=hits.length+' of '+R.length+' Q&As';
+  $('results').innerHTML=hits.slice(0,200).map((r,i)=>`
+    <div class="card">
+      <div class="meta"><b>${esc(r.authority.toUpperCase())} ${esc(r.qa_id)}</b>
+        ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
+        ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}</div>
+      <div class="q">${hl(r.question.slice(0,400),terms)}${r.question.length>400?'…':''}</div>
+      <div class="a clamp" id="a${i}">${hl(r.answer,terms)}</div>
+      <button class="more" onclick="document.getElementById('a${i}').classList.toggle('clamp')">show full answer</button>
+      · <a href="${esc(r.source_url)}" rel="noopener">original at the authority</a>
+    </div>`).join('')||'<div class="count">No matches.</div>';
+}
+fetch('records.json').then(r=>r.json()).then(d=>{
+  R=d;
+  for(const[id,key]of[['act','legal_act'],['auth','authority']]){
+    [...new Set(R.map(r=>r[key]).filter(Boolean))].sort().forEach(v=>{
+      const o=document.createElement('option');o.value=v;o.textContent=v.toUpperCase();$(id).appendChild(o);});
+  }
+  render();
+});
+['q','act','auth'].forEach(id=>$(id).addEventListener('input',render));
+</script>
+</body>
+</html>
