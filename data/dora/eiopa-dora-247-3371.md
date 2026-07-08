@@ -10,7 +10,7 @@ topic: "Digital operational resilience testing (DORA)"
 status: "Final"
 date_date_of_submission: "23 Jun 2025"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-247-3371_en"
-retrieved_at: "2026-07-07T23:29:42+00:00"
+retrieved_at: "2026-07-08T01:38:43+00:00"
 ---
 
 # EIOPA Q&A DORA 247 - 3371

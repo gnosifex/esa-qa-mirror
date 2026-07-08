@@ -22,7 +22,8 @@ def build(root: Path) -> int:
             continue
         fm = yaml.safe_load(parts[1]) or {}
         body = "---".join(parts[2:])
-        q = re.search(r"## Question\n(.*?)\n## Answer", body, re.S)
+        q = re.search(r"## Question\n(.*?)\n## (?:Background|Answer)", body, re.S)
+        b = re.search(r"## Background\n(.*?)\n## Answer", body, re.S)
         a = re.search(r"## Answer\n(.*?)(?:\n---\n|$)", body, re.S)
         records.append({
             "authority": fm.get("authority", ""),
@@ -35,6 +36,7 @@ def build(root: Path) -> int:
             "source_url": fm.get("source_url", ""),
             "file": str(f.relative_to(root)),
             "question": (q.group(1).strip() if q else ""),
+            "background": (b.group(1).strip() if b else ""),
             "answer": (a.group(1).strip() if a else ""),
         })
     out = root / "docs" / "records.json"

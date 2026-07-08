@@ -20,10 +20,10 @@
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
   .meta { font-size:.8rem; color:var(--muted); margin-bottom:.35rem; }
   .meta b { color:var(--fg); }
-  .q { font-weight:600; margin:.15rem 0 .4rem; }
+  .q { font-weight:600; margin:.15rem 0 .4rem; white-space:pre-line; }
   .label { font-size:.7rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-top:.5rem; }
   .a { font-size:.92rem; white-space:pre-line; }
-  .a.clamp { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+  .card:not(.open) .clampable { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
   .more { font-size:.82rem; color:var(--accent); cursor:pointer; background:none; border:none; padding:0; }
   a { color:var(--accent); }
   .disclaimer { margin-top:2rem; font-size:.78rem; color:var(--muted); border-top:1px solid var(--border); padding-top:.8rem; }
@@ -52,8 +52,8 @@ version prevails. Content © EBA / EIOPA / ESMA, reuse subject to their legal no
 <script>
 let R=[];
 const $=id=>document.getElementById(id);
-function toggleAns(id,btn){const el=document.getElementById(id);el.classList.toggle('clamp');
-  btn.textContent=el.classList.contains('clamp')?'show full answer ▾':'collapse answer ▴';}
+function toggleCard(btn){const card=btn.closest('.card');card.classList.toggle('open');
+  btn.textContent=card.classList.contains('open')?'collapse ▴':'show full Q&A ▾';}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function hl(s,terms){let e=esc(s);for(const t of terms){if(t.length<2)continue;
   e=e.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');}return e;}
@@ -64,7 +64,7 @@ function render(){
     if(act&&r.legal_act!==act)return false;
     if(auth&&r.authority!==auth)return false;
     if(!terms.length)return true;
-    const hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '+r.question+' '+r.answer).toLowerCase();
+    const hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '+r.question+' '+(r.background||'')+' '+r.answer).toLowerCase();
     return terms.every(t=>hay.includes(t));
   });
   $('count').textContent=hits.length+' of '+R.length+' Q&As';
@@ -74,10 +74,11 @@ function render(){
         ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
         ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}</div>
       <div class="label">Question</div>
-      <div class="q">${hl(r.question.slice(0,400),terms)}${r.question.length>400?'…':''}</div>
+      <div class="q clampable">${hl(r.question,terms)}</div>
+      ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,terms)}</div>`:''}
       <div class="label">Answer</div>
-      <div class="a clamp" id="a${i}">${hl(r.answer,terms)}</div>
-      <button class="more" onclick="toggleAns('a${i}',this)">show full answer ▾</button>
+      <div class="a clampable">${hl(r.answer,terms)}</div>
+      <button class="more" onclick="toggleCard(this)">show full Q&amp;A ▾</button>
       · <a href="${esc(r.source_url)}" rel="noopener">original at the authority</a>
     </div>`).join('')||'<div class="count">No matches.</div>';
 }

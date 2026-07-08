@@ -10,7 +10,7 @@ topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "18 Apr 2024"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora092-3076_en"
-retrieved_at: "2026-07-07T23:30:01+00:00"
+retrieved_at: "2026-07-08T01:39:02+00:00"
 ---
 
 # EIOPA Q&A DORA092 - 3076

@@ -19,6 +19,7 @@ KNOWN_LABELS = {
     "topic": "topic",
     "status": "status",
     "question": "question",
+    "background on the question": "background",
     "answer": "answer",
     "final answer": "answer",
 }

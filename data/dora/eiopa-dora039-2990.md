@@ -10,7 +10,7 @@ topic: "Register of Information (DORA)"
 status: "Final"
 date_date_of_submission: "14 Feb 2024"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora039-2990_en"
-retrieved_at: "2026-07-07T23:29:59+00:00"
+retrieved_at: "2026-07-08T01:39:00+00:00"
 ---
 
 # EIOPA Q&A DORA039 - 2990

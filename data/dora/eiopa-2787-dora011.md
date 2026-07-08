@@ -10,7 +10,7 @@ topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "07 Sep 2023"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2787-dora011_en"
-retrieved_at: "2026-07-07T23:30:13+00:00"
+retrieved_at: "2026-07-08T01:39:14+00:00"
 ---
 
 # EIOPA Q&A 2787 - DORA011

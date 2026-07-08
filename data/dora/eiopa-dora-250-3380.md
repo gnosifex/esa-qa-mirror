@@ -10,7 +10,7 @@ topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "09 Jul 2025"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-250-3380_en"
-retrieved_at: "2026-07-07T23:29:43+00:00"
+retrieved_at: "2026-07-08T01:38:45+00:00"
 ---
 
 # EIOPA Q&A DORA 250 - 3380

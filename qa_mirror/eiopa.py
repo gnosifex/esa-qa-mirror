@@ -74,6 +74,7 @@ def fetch_record(http: Http, url: str) -> Record:
         if not body and heading.parent is not None:
             body = html_to_text(heading.parent)
             body = re.sub(rf"^{re.escape(heading.get_text(' ', strip=True))}\s*", "", body).strip()
+        body = re.sub(r"^(?:eiopa\s+answer|answer|question)\b[\s:]*", "", body, flags=re.I)
         if "answer" in title and not rec.answer:
             rec.answer = body
         elif "question" in title and not rec.question:

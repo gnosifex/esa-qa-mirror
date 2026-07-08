@@ -113,6 +113,7 @@ class Record:
     dates: dict = field(default_factory=dict)   # submission/publication/... as found
     retrieved_at: str = ""                       # UTC timestamp of this fetch
     question: str = ""
+    background: str = ""                         # e.g. EBA "Background on the question"
     answer: str = ""
     extra: dict = field(default_factory=dict)   # any further portal fields, verbatim
 
@@ -175,6 +176,10 @@ class Record:
             "",
             self.question or "*(not captured)*",
             "",
+        ]
+        if self.background:
+            body += ["## Background", "", self.background, ""]
+        body += [
             "## Answer",
             "",
             self.answer or "*(not captured)*",
