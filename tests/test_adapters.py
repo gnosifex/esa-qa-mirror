@@ -194,7 +194,9 @@ class FlakyHttp:
         return SimpleNamespace(text=seq.pop(0) if len(seq) > 1 else seq[0])
 
 
-def test_esma_listing_retries_unfiltered_cache_responses():
+def test_esma_listing_retries_unfiltered_cache_responses(monkeypatch):
+    from qa_mirror import common
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
     base = esma_listing_base()
     junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
     good = (f'<a href="/publications-data/questions-answers/2646">x</a>'
@@ -205,9 +207,11 @@ def test_esma_listing_retries_unfiltered_cache_responses():
     assert urls == [f"{esma.BASE}/publications-data/questions-answers/2646"]
 
 
-def test_esma_listing_fails_closed_on_persistent_unfiltered_responses():
+def test_esma_listing_fails_closed_on_persistent_unfiltered_responses(monkeypatch):
     import pytest as _pytest
 
+    from qa_mirror import common
+    monkeypatch.setattr(common.time, "sleep", lambda s: None)
     base = esma_listing_base()
     junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
     http = FlakyHttp({base: [junk]})
@@ -218,9 +222,11 @@ def test_esma_listing_fails_closed_on_persistent_unfiltered_responses():
 def test_esma_fetch_record(fixture_html):
     url = f"{esma.BASE}/publications-data/questions-answers/2356"
     rec = esma.fetch_record(FakeHttp({url: fixture_html("esma_detail.html")}), url)
-    rec.finalize({"default_act_ref": "2022/2554"})
+    rec.finalize({})  # no default needed: the act comes from field-qa-level1
     assert rec.qa_id == "2356"
+    assert rec.legal_act_raw.startswith("Regulation (EU) 2022/2554")
     assert rec.legal_act == "DORA"
+    assert rec.legal_act_ref == "(EU) 2022/2554"
     assert rec.topic == "Incident reporting"
     assert rec.status == "Answered"
     assert rec.dates == {"answer_publication_date": "12 Apr 2024"}

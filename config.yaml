@@ -49,7 +49,11 @@ esma:
   # a cache-bypass cookie and follows only the portal's own pager links (see
   # qa_mirror/esma.py for the full story).
   level1_ids: [20010]
+  # Since the portal migration, detail pages expose the level-1 act
+  # (field-qa-level1) — records are labeled from it, and require_act_ref is
+  # a second guard against unfiltered listings on top of the facet-echo
+  # validation. default_act_ref only covers records without the field.
   default_act_ref: "2022/2554"
-  # ESMA exposes no act on detail pages, so no require_act_ref is possible;
-  # this at least keeps unanswered ("Question Published") entries out.
+  require_act_ref: "2022/2554"
+  # keeps unanswered ("Question Published") entries out
   require_status: "Answer Published"

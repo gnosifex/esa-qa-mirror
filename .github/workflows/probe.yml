@@ -40,6 +40,37 @@ jobs:
         run: |
           curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
           file qa.xlsx
+      - name: ESMA alternative sources — jsonapi, sitemap, detail-page act markers
+        run: |
+          echo "== /jsonapi root:"
+          curl -sS -A "$UA" "https://www.esma.europa.eu/jsonapi" -o j.json -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
+          python3 -c "import json;d=json.load(open('j.json'));links=d.get('links',{});print(len(links),'resource types');print([k for k in links if 'qa' in k.lower()][:10])" 2>/dev/null || head -c 300 j.json
+          echo ""
+          echo "== sitemap:"
+          curl -sS -A "$UA" "https://www.esma.europa.eu/sitemap.xml" -o sm.xml -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -o '<loc>[^<]*</loc>' sm.xml | head -5
+          grep -c 'questions-answers' sm.xml || true
+          echo "== DORA detail page (2103): possible act markers"
+          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o d1.html -w "HTTP %{http_code}\n"
+          grep -io 'dora\|2022/2554' d1.html | sort | uniq -c | head -5
+          grep -oE 'field--name-[a-z-]+' d1.html | sort -u | head -20
+          echo "== non-DORA detail page (2856): same markers"
+          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2856" -o d2.html -w "HTTP %{http_code}\n"
+          grep -io 'dora\|2022/2554' d2.html | sort | uniq -c | head -5
+      - name: ESMA detail field contents (act labeling)
+        run: |
+          for id in 2103 2856; do
+            echo "=== $id"
+            curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/$id" -o d.html -w "HTTP %{http_code}\n"
+            python3 - <<'PY'
+          import re
+          html = open("d.html").read()
+          for name in ("field-lqa-ist-of-topics", "field-qa-level", "field-qa-subject-matter"):
+              m = re.search(rf'field--name-{name}.*?</div>\s*</div>', html, re.S)
+              chunk = re.sub(r"<[^>]+>", " ", m.group(0))[:400] if m else "(not found)"
+              print(f"--- {name}:", re.sub(r"\s+", " ", chunk).strip()[:300])
+          PY
+          done
       - name: ESMA listing (cookie bypass + full exposed-form params)
         run: |
           base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
