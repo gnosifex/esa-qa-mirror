@@ -104,88 +104,21 @@ def html_to_text(node) -> str:
     return "\n\n".join(parts)
 
 
-def iter_pager_listing(
-    http: Http,
-    url_for,
-    href_re: str,
-    max_pages: int,
-    tag: str,
-    headers: dict | None = None,
-    validate=None,
-    retries: int = 4,
-):
-    """Yield detail links, following only pages the portal's own pager advertises.
-
-    For portals where a blind page++ loop is unsafe: requesting a page beyond
-    the last one has been observed to return an *unfiltered default listing*
-    instead of an empty page (importing unrelated records), and an explicit
-    page parameter on the first request can reset the view's filters.
-    url_for(page) must therefore return the page-0 URL without a page
-    parameter; further pages are discovered from pager hrefs in the HTML.
-
-    `validate(html) -> bool` guards against cache nodes that randomly ignore
-    the query string and serve an unfiltered page: an invalid response is
-    retried up to `retries` times, then the listing FAILS (RuntimeError) —
-    importing from an unfiltered page silently pollutes the corpus, so
-    fail-closed is the only safe reaction. The bad windows have been observed
-    to last minutes, so retries back off up to several minutes (a mirror run
-    has hours of headroom; a red run costs a week until the next cron).
-    """
-    seen = set()
-    known_pages = {0}
-    done_pages: set[int] = set()
-    while True:
-        remaining = sorted(known_pages - done_pages)
-        if not remaining:
-            return
-        page = remaining[0]
-        if page >= max_pages:
-            print(
-                f"[{tag}] WARNING: pager advertises page {page} beyond "
-                f"max_pages={max_pages} — listing may be truncated",
-                file=sys.stderr,
-            )
-            return
-        for attempt in range(retries + 1):
-            html = http.get(url_for(page), headers=headers or {}).text
-            if validate is None or validate(html):
-                break
-            wait = min(240, 15 * 2**attempt)
-            print(
-                f"[{tag}] listing page {page} failed validation "
-                f"(attempt {attempt + 1}/{retries + 1}) — unfiltered cache "
-                f"response? retrying in {wait}s",
-                file=sys.stderr,
-            )
-            if attempt < retries:
-                time.sleep(wait)
-        else:
-            raise RuntimeError(
-                f"listing page {page} kept failing validation — the portal is "
-                "serving unfiltered responses; refusing to import from them"
-            )
-        done_pages.add(page)
-        known_pages |= {int(n) for n in re.findall(r"[?&;]page=(\d+)", html)}
-        for link in sorted(set(re.findall(href_re, html)) - seen):
-            seen.add(link)
-            yield link
-
-
 def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
     """Yield detail-page links from a 0-based paginated listing, in page order.
 
-    Stops on a page without any detail links, or after two consecutive pages
-    with no *new* links — a single stale page (e.g. only pinned/already-seen
-    entries) must not silently cut off the rest of the corpus. Warns when
-    max_pages is exhausted, since that also means possible truncation.
+    Stops after two consecutive pages with no *new* links. A single barren page
+    — whether it carries no links at all (a transient empty response mid-listing)
+    or only already-seen ones (pinned/duplicate entries) — must not silently cut
+    off the rest of the corpus, so both cases are treated the same and only a
+    second consecutive one ends the walk. Warns when max_pages is exhausted,
+    since that also means possible truncation.
     """
     seen = set()
     stale = 0
     for page in range(max_pages):
         html = http.get(page_url(page)).text
         links = set(re.findall(href_re, html))
-        if not links:
-            return
         new = links - seen
         if not new:
             stale += 1

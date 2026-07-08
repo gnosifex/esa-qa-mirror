@@ -25,6 +25,29 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Register row inspection — DORA138 / native-id vs link mismatch
+        run: |
+          python3 - <<'PY'
+          from qa_mirror import register
+          rows = register.fetch_rows()
+          # every row whose link id disagrees with the register's native id —
+          # a mismatch means the "Link to the answer" points at the wrong doc
+          mism = [r for r in rows
+                  if r["native_id"] and r["link"].rstrip("/").rsplit("/", 1)[-1]
+                  != r["native_id"] and r["native_id"] not in r["link"]]
+          print(f"=== link/native-id mismatches: {len(mism)} of {len(rows)} rows")
+          for r in mism:
+              print(f"  {r['joint_id']} {r['authority']} native={r['native_id']!r} "
+                    f"act={r['legal_act_raw']!r} link={r['link']}")
+          print("=== DORA13x rows in full")
+          for r in rows:
+              if r["joint_id"].startswith("DORA13"):
+                  print(" ", r)
+          print("=== any row linking to esma 2364")
+          for r in rows:
+              if "2364" in r["link"] or r["native_id"] == "2364":
+                  print(" ", r)
+          PY
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
@@ -36,6 +59,34 @@ jobs:
     env:
       UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
     steps:
+      - name: Joint Q&A Register PowerBI backend (conceptualschema 400 diagnosis)
+        run: |
+          pip install --quiet requests
+          python3 - <<'PY'
+          import requests
+          KEY = "e190a6e7-a75d-4543-b3e3-5d1a328e663e"
+          HOST = "wabi-west-europe-d-primary-api.analysis.windows.net"
+          H = {"X-PowerBI-ResourceKey": KEY, "User-Agent": "esa-qa-mirror-probe"}
+          s = requests.Session()
+          m = s.get(f"https://{HOST}/public/reports/{KEY}/modelsAndExploration"
+                    "?preferReadOnlySession=true", headers=H, timeout=60)
+          print("modelsAndExploration:", m.status_code)
+          mj = m.json()
+          model = mj["models"][0]
+          mid = model["id"]
+          rep = (mj.get("exploration") or {}).get("report", {}).get("objectId")
+          print("  modelId=%r (%s)  dbName=%r  reportId=%r"
+                % (mid, type(mid).__name__, model.get("dbName"), rep))
+          for attempt in range(3):
+              cs = s.post(f"https://{HOST}/public/reports/conceptualschema",
+                          headers=H,
+                          json={"userPreferredLocale": "en-US", "models": [mid]},
+                          timeout=60)
+              print(f"conceptualschema attempt {attempt}: {cs.status_code}")
+              print("  body:", cs.text[:1500])
+              if cs.status_code == 200:
+                  break
+          PY
       - name: EIOPA XLSX export (the listing source)
         run: |
           curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
@@ -65,7 +116,7 @@ jobs:
             python3 - <<'PY'
           import re
           html = open("d.html").read()
-          for name in ("field-lqa-ist-of-topics", "field-qa-level", "field-qa-subject-matter"):
+          for name in ("field-qa-list-of-topics", "field-qa-level", "field-qa-subject-matter"):
               m = re.search(rf'field--name-{name}.*?</div>\s*</div>', html, re.S)
               chunk = re.sub(r"<[^>]+>", " ", m.group(0))[:400] if m else "(not found)"
               print(f"--- {name}:", re.sub(r"\s+", " ", chunk).strip()[:300])

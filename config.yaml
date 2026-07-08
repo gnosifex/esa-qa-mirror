@@ -1,68 +1,28 @@
-# Which Q&A sets to mirror. IDs are the portals' own facet values —
-# take them from the portal search URL after filtering manually in the browser.
+# What to mirror. This tool is scoped to BANKING supervision: the EBA Single
+# Rulebook Q&As (banking-sector acts) plus the Joint ESAs Q&As that also bind
+# credit institutions (DORA today). Two discovery sources — the Joint Q&A
+# Register for joint acts, the EBA's own search for sectoral acts.
 
 delay_seconds: 1.5
 
-# default_act_ref: fallback regulation reference ("YYYY/N") for the structured
-# legal_act fields when the portal exposes no legal-act string on the detail page.
+# Joint ESAs Q&As — discovered via the Joint Q&A Register (the canonical index
+# of Q&As answered jointly across EBA/EIOPA/ESMA). One register query returns
+# every joint Q&A with its receiving authority, native detail-page id and a
+# direct answer link; we fetch that authority's detail page for the content.
+# register_act matches the register's "Legal act" by substring; statuses are
+# the register Status values to mirror (Final includes EU-Commission answers).
+joint_acts:
+  DORA:
+    register_act: "DORA"
+    act_ref: "2022/2554"
+    statuses: ["Final"]
 
-# Optional: declare additional legal acts here (extends the built-in tables in
-# qa_mirror/common.py — no code change needed). Example:
-# acts:
-#   "575/2013":
-#     label: "CRR"                       # canonical label → directory data/crr/
-#   "1286/2014":
-#     label: "PRIIPS"
-#     joint_id_format: "{token}{num:03d}" # only for Joint-ESAs acts; check the
-#     token: "PRIIPS"                     # Joint Q&A Register for the ID style
-acts: {}
-
+# EBA Single Rulebook Q&As — banking-sector acts that live solely at the EBA
+# (no Joint Q&As). Add further banking acts here as needed (config only):
+#   33 = CRR (575/2013)  ·  38 = PSD2  ·  31 = BRRD  ·  18 = MiCAR
+# Caution: CRR alone is a very large corpus (years of Q&As) — long first run.
 eba:
-  # EBA Single Rulebook Q&A facet "Legal act" (qa_legal_act[]).
-  # 20 = Regulation (EU) 2022/2554 (DORA Reg), 19 = Directive (EU) 2022/2556 (DORA
-  # amending directive). Banking-sector acts are EBA-only (no Joint Q&As!) — add
-  # them here when needed, e.g.: 32 = CRD (2013/36/EU), 33 = CRR (575/2013),
-  # 38 = PSD2, 31 = BRRD, 18 = MiCAR. Caution: CRR alone carries a very large
-  # corpus (years of Q&As) — expect a long first run.
-  legal_act_ids: [19, 20, 32]   # 32 = CRD (Directive 2013/36/EU)
-  default_act_ref: "2022/2554"
-  # The EBA search form has no status facet; listings have only shown finals in
-  # practice — this post-filter guarantees it (records with any other status are skipped).
+  legal_act_ids: [32]          # 32 = CRD (Directive 2013/36/EU)
+  default_act_ref: "2013/36"
+  # The EBA search has no status facet; this post-filter keeps only finals.
   require_status: "Final"
-
-eiopa:
-  # The listing comes from EIOPA's official full-database XLSX export, filtered
-  # by require_act_ref against the "Regulation Reference" column — the HTML
-  # search is served by cache nodes that randomly ignore facet parameters since
-  # the 2026 portal migration (see qa_mirror/eiopa.py for the full story), the
-  # export is deterministic. No facet IDs needed anymore.
-  default_act_ref: "2022/2554"
-  require_status: "Final"
-  # Doubles as the export row filter and the per-record post-filter.
-  require_act_ref: "2022/2554"
-
-esma:
-  # ESMA "final" Q&A search facet field_qa_level1_target_id. 20010 = DORA.
-  # ESMA detail pages expose no legal-act field — the default_act_ref fills it.
-  # NOTE (2026-07-08): the listing sits behind a query-ignoring cache and an
-  # out-of-range page serves an unfiltered default listing — the adapter sends
-  # a cache-bypass cookie and follows only the portal's own pager links (see
-  # qa_mirror/esma.py for the full story).
-  level1_ids: [20010]
-  # Since the portal migration, detail pages expose the level-1 act
-  # (field-qa-level1) — records are labeled from it, and require_act_ref is
-  # a second guard against unfiltered listings on top of the facet-echo
-  # validation. Deliberately NO default_act_ref: the sequential-ID-scan
-  # fallback fetches records of all acts, and a default would mislabel any
-  # record lacking the act field as DORA.
-  require_act_ref: "2022/2554"
-  # keeps unanswered ("Question Published") entries out
-  require_status: "Answer Published"
-  # Fallback discovery when the search keeps serving unfiltered responses:
-  # walk the sequential detail-page IDs from here until id_scan_gap
-  # consecutive IDs are missing. 2100 predates the first DORA Q&A (2103).
-  # The gap must exceed ESMA's dead zones — its ID space has runs of >50
-  # consecutive non-existent IDs between Q&A clusters, so a smaller gap ends
-  # the scan early and never reaches the higher DORA records (2248-2646).
-  id_scan_start: 2100
-  id_scan_gap: 300

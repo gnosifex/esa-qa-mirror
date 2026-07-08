@@ -1,180 +1,197 @@
-from types import SimpleNamespace
-
 import pytest
 
-from qa_mirror import cli
+from qa_mirror import cli, eba, eiopa, esma, register
 from qa_mirror.common import Record, State
 
 
-def make_adapter(records, listing_error=None):
-    """Fake adapter module: yields one URL per record, serves records by URL."""
-    by_url = {r.source_url: r for r in records}
-
-    def list_detail_urls(http, params):
-        if listing_error:
-            raise listing_error
-        yield from by_url
-
-    def fetch_record(http, url):
-        rec = by_url[url]
-        # fetch_record constructs a fresh Record; emulate that so mutation
-        # (retrieved_at) does not leak between runs
-        return Record(**{**rec.__dict__})
-
-    return SimpleNamespace(list_detail_urls=list_detail_urls, fetch_record=fetch_record)
+def row(joint, auth, native, status="Final",
+        act="DORA - Regulation (EU) 2022/2554"):
+    return {
+        "joint_id": joint, "authority": auth, "native_id": native,
+        "link": f"https://portal/{auth}/{native}", "status": status,
+        "legal_act_raw": act, "article": "1", "topic": "t",
+        "answered_by": "Joint ESAs", "date_submission": "2024-01-01",
+        "date_publication": "2025-01-01",
+    }
 
 
-def rec(authority, qa_id, **kw):
-    base = dict(
-        authority=authority, qa_id=qa_id,
-        source_url=f"https://example.org/{authority}/{qa_id}",
-        legal_act="DORA", question="Q?", answer="A.", status="Final Q&A",
-    )
-    base.update(kw)
-    return Record(**base)
+def fake_discover(rows):
+    """Mirror register.discover's filtering over a canned row list."""
+    def discover(session, act_substr, statuses, authorities):
+        return [r for r in rows
+                if act_substr.lower() in r["legal_act_raw"].lower()
+                and r["status"] in statuses
+                and r["authority"] in authorities
+                and r["link"].startswith("http")]
+    return discover
+
+
+def fetch_for(auth):
+    def fetch(http, url):
+        nid = url.rstrip("/").rsplit("/", 1)[-1]
+        return Record(authority=auth, qa_id=nid, source_url=url,
+                      question="Q?", answer="A.")
+    return fetch
+
+
+def install(monkeypatch, rows, eba_listing=None):
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    for auth, mod in (("eiopa", eiopa), ("esma", esma), ("eba", eba)):
+        monkeypatch.setattr(mod, "fetch_record", fetch_for(auth))
+    if eba_listing is not None:
+        monkeypatch.setattr(eba, "list_detail_urls",
+                            lambda http, params, **kw: iter(eba_listing))
+
+
+JOINT_CFG = (
+    "delay_seconds: 0\n"
+    "joint_acts:\n"
+    "  DORA:\n"
+    "    register_act: DORA\n"
+    "    act_ref: '2022/2554'\n"
+    "    statuses: [Final]\n"
+)
 
 
 @pytest.fixture
 def root(tmp_path):
-    (tmp_path / "config.yaml").write_text("delay_seconds: 0\nacts: {}\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text(JOINT_CFG, encoding="utf-8")
     return tmp_path
 
 
-def run(root, adapters, *argv):
-    cli.ADAPTERS.clear()
-    cli.ADAPTERS.update(adapters)
+def run(root, *argv):
     return cli.main(["--root", str(root), *argv])
 
 
-@pytest.fixture(autouse=True)
-def restore_adapters():
-    saved = dict(cli.ADAPTERS)
-    yield
-    cli.ADAPTERS.clear()
-    cli.ADAPTERS.update(saved)
+def default_rows():
+    return [
+        row("DORA001", "eiopa", "2622"),
+        row("DORA003", "eiopa", "2734"),
+        row("DORA050", "esma", "2103"),
+        row("DORA002", "eiopa", "2673", status="Rejected"),  # filtered out
+    ]
 
 
-def test_partial_failure_exits_nonzero(root, capsys):
-    adapters = {
-        "good": make_adapter([rec("good", "1")]),
-        "bad": make_adapter([], listing_error=RuntimeError("portal down")),
-    }
-    assert run(root, adapters) == 1
-    assert (root / "data" / "dora" / "good-1.md").exists()  # partial results kept
-    assert "LISTING FAILED" in capsys.readouterr().err
-
-
-def test_clean_run_exits_zero(root):
-    assert run(root, {"good": make_adapter([rec("good", "1")])}) == 0
-
-
-def test_delisting_marks_missing_records(root):
-    r1, r2 = rec("good", "1"), rec("good", "2")
-    assert run(root, {"good": make_adapter([r1, r2])}) == 0
-    # next run: record 2 vanished from the listing
-    assert run(root, {"good": make_adapter([r1])}) == 0
-    kept = (root / "data" / "dora" / "good-1.md").read_text(encoding="utf-8")
-    gone = (root / "data" / "dora" / "good-2.md").read_text(encoding="utf-8")
-    assert "x_delisted" not in kept
-    assert "x_delisted:" in gone  # marked, never deleted
+def test_joint_discovery_writes_then_delta(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root) == 0
+    # three Final DORA rows written; the Rejected one skipped
+    assert (root / "data" / "dora" / "eiopa-2622.md").exists()
+    assert (root / "data" / "dora" / "eiopa-2734.md").exists()
+    assert (root / "data" / "dora" / "esma-2103.md").exists()
+    assert not (root / "data" / "dora" / "eiopa-2673.md").exists()
+    # register metadata landed on the record
+    text = (root / "data" / "dora" / "eiopa-2622.md").read_text()
+    assert 'joint_id: "DORA001"' in text
+    assert 'legal_act: "DORA"' in text
+    # second run: nothing changed
+    assert run(root) == 0
     state = State(root / "state.json")
-    assert state.data["records"]["good:2"].startswith("delisted:")
-    # a third identical run must not re-mark or grow the marker
-    assert run(root, {"good": make_adapter([r1])}) == 0
-    assert gone == (root / "data" / "dora" / "good-2.md").read_text(encoding="utf-8")
+    assert state.data["records"]["eiopa:2622"]  # remembered
 
 
-def test_no_delisting_on_limited_or_failing_runs(root):
-    r1, r2 = rec("good", "1"), rec("good", "2")
-    run(root, {"good": make_adapter([r1, r2])})
+def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
+    # A joint DORA row whose ESMA detail page tags the act as "MiCA" (a real
+    # DORA/MiCA VASP crossover) must still file under DORA — the register, not
+    # the receiving portal, classifies the joint act.
+    rows = [row("DORA138", "esma", "2364",
+                act="DORA - Regulation (EU) 2022/2554")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
 
-    run(root, {"good": make_adapter([r1])}, "--limit", "1")  # truncated listing
-    assert "x_delisted" not in (root / "data" / "dora" / "good-2.md").read_text(
-        encoding="utf-8")
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2364", source_url=url,
+                      legal_act_raw="MiCA", question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
 
-    run(root, {"good": make_adapter([], listing_error=RuntimeError("down"))})
-    assert "x_delisted" not in (root / "data" / "dora" / "good-2.md").read_text(
-        encoding="utf-8")
-
-
-def test_deleted_file_is_restored_despite_matching_hash(root):
-    r1 = rec("good", "1")
-    run(root, {"good": make_adapter([r1])})
-    (root / "data" / "dora" / "good-1.md").unlink()
-    run(root, {"good": make_adapter([r1])})
-    assert (root / "data" / "dora" / "good-1.md").exists()
-
-
-def test_github_step_summary(root, monkeypatch, tmp_path):
-    summary = tmp_path / "summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    run(root, {"good": make_adapter([rec("good", "1")])})
-    text = summary.read_text(encoding="utf-8")
-    assert "| authority | seen | written | delisted | errors |" in text
-    assert "| good | 1 | 1 | 0 | 0 |" in text
+    assert run(root) == 0
+    doc = root / "data" / "dora" / "esma-2364.md"
+    assert doc.exists()
+    assert not (root / "data" / "unsorted" / "esma-2364.md").exists()
+    # the portal's differing act classification is kept visible, not hidden
+    text = doc.read_text()
+    assert 'legal_act: "DORA"' in text
+    assert 'x_portal_legal_act: "MiCA"' in text
 
 
-def test_require_status_skips_and_delists(root):
-    (root / "config.yaml").write_text(
-        "delay_seconds: 0\nacts: {}\ngood:\n  require_status: Final\n",
-        encoding="utf-8",
-    )
-    final, draft = rec("good", "1"), rec("good", "2", status="Under review")
-    run(root, {"good": make_adapter([final, draft])})
-    assert (root / "data" / "dora" / "good-1.md").exists()
-    assert not (root / "data" / "dora" / "good-2.md").exists()
+def test_matching_act_wording_is_not_flagged_as_disagreement(root, monkeypatch):
+    # portal and register describe the same act with different word order — must
+    # NOT be recorded as a disagreement
+    rows = [row("DORA003", "esma", "2356",
+                act="DORA - Regulation (EU) 2022/2554")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2356", source_url=url,
+                      legal_act_raw="Regulation (EU) 2022/2554 - DORA",
+                      question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
+
+    assert run(root) == 0
+    text = (root / "data" / "dora" / "esma-2356.md").read_text()
+    assert "x_portal_legal_act" not in text
 
 
-def test_mass_delisting_is_refused_and_reported(root, capsys):
-    recs = [rec("good", str(i)) for i in range(8)]
-    assert run(root, {"good": make_adapter(recs)}) == 0
-    # broken listing filter: suddenly no known record is listed
-    assert run(root, {"good": make_adapter([])}) == 1
-    assert "implausible listing" in capsys.readouterr().err
-    for i in range(8):
-        assert "x_delisted" not in (root / "data" / "dora" / f"good-{i}.md").read_text(
-            encoding="utf-8")
-    # explicit override marks them and exits clean
-    assert run(root, {"good": make_adapter([])}, "--allow-mass-delisting") == 0
-    for i in range(8):
-        assert "x_delisted" in (root / "data" / "dora" / f"good-{i}.md").read_text(
-            encoding="utf-8")
-    # already-delisted keys must not keep tripping the brake on later runs
-    # (post-migration corpora would otherwise stay red forever)
-    assert run(root, {"good": make_adapter([])}) == 0
+def test_authority_filter_restricts_rows(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root, "--authority", "esma") == 0
+    assert (root / "data" / "dora" / "esma-2103.md").exists()
+    assert not (root / "data" / "dora" / "eiopa-2622.md").exists()
 
 
-def test_single_delisting_passes_the_plausibility_brake(root):
-    recs = [rec("good", str(i)) for i in range(6)]
-    run(root, {"good": make_adapter(recs)})
-    assert run(root, {"good": make_adapter(recs[1:])}) == 0
-    assert "x_delisted" in (root / "data" / "dora" / "good-0.md").read_text(encoding="utf-8")
-    assert "x_delisted" not in (root / "data" / "dora" / "good-1.md").read_text(encoding="utf-8")
+def test_register_failure_is_error_and_suppresses_delisting(root, monkeypatch):
+    # first, a good run to populate state
+    install(monkeypatch, default_rows())
+    run(root)
+    # now the register query fails wholesale
+    def boom(session, act, statuses, authorities):
+        raise register.RegisterError("powerbi down")
+    monkeypatch.setattr(cli.register, "discover", boom)
+    assert run(root) == 1  # red
+    # nothing delisted despite the records being "unseen" this run
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
 
 
-def test_require_act_ref_skips_foreign_records(root):
-    (root / "config.yaml").write_text(
-        "delay_seconds: 0\nacts: {}\ngood:\n  require_act_ref: \"2022/2554\"\n",
-        encoding="utf-8",
-    )
-    dora = rec("good", "1", legal_act_raw="Regulation (EU) 2022/2554 (DORA)")
-    foreign = rec("good", "2", legal_act_raw="(EU) 2023/894 - some Solvency II ITS")
-    unparseable = rec("good", "3", legal_act_raw="Risk-Free Interest Rate")
-    assert run(root, {"good": make_adapter([dora, foreign, unparseable])}) == 0
-    assert (root / "data" / "dora" / "good-1.md").exists()
-    assert not list((root / "data").glob("*/good-2.md"))
-    assert not list((root / "data").glob("*/good-3.md"))
+def test_delisting_marks_vanished_joint_record(root, monkeypatch):
+    rows = [row("DORA00%d" % i, "eiopa", str(2600 + i)) for i in range(8)]
+    install(monkeypatch, rows)
+    run(root)
+    # one row disappears from the register (well under the brake threshold)
+    install(monkeypatch, rows[:-1])
+    assert run(root) == 0
+    gone = root / "data" / "dora" / f"eiopa-{2600 + 7}.md"
+    assert "x_delisted:" in gone.read_text()
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2600.md").read_text()
 
 
-def test_delisting_needs_prior_state(root, tmp_path):
-    # a record written earlier whose status left the mirrored set gets marked
-    r1, r2 = rec("good", "1"), rec("good", "2")
-    run(root, {"good": make_adapter([r1, r2])})
-    (root / "config.yaml").write_text(
-        "delay_seconds: 0\nacts: {}\ngood:\n  require_status: Final\n",
-        encoding="utf-8",
-    )
-    r2_review = rec("good", "2", status="Under review")
-    run(root, {"good": make_adapter([r1, r2_review])})
-    assert "x_delisted:" in (root / "data" / "dora" / "good-2.md").read_text(
-        encoding="utf-8")
+def test_mass_delisting_brake(root, monkeypatch):
+    rows = [row("DORA00%d" % i, "eiopa", str(2600 + i)) for i in range(8)]
+    install(monkeypatch, rows)
+    run(root)
+    install(monkeypatch, [])  # everything vanished at once → implausible
+    assert run(root) == 1
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2600.md").read_text()
+    assert run(root, "--allow-mass-delisting") == 0
+    assert "x_delisted:" in (root / "data" / "dora" / "eiopa-2600.md").read_text()
+
+
+def test_eba_sectoral_alongside_joint(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(
+        JOINT_CFG + "eba:\n  legal_act_ids: [32]\n  default_act_ref: '2013/36'\n"
+        "  require_status: Final\n", encoding="utf-8")
+    listing = [f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/2013_9"]
+
+    # eba.fetch_record for the sectoral CRD record returns a CRD record
+    def eba_fetch(http, url):
+        return Record(authority="eba", qa_id="2013_9", source_url=url,
+                      status="Final Q&A", legal_act_raw="Directive 2013/36/EU (CRD)",
+                      question="Q", answer="A")
+    install(monkeypatch, default_rows())
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch)
+    monkeypatch.setattr(eba, "list_detail_urls",
+                        lambda http, params, **kw: iter(listing))
+
+    assert cli.main(["--root", str(tmp_path)]) == 0
+    # joint EBA-less run still wrote EIOPA/ESMA joint records...
+    assert (tmp_path / "data" / "dora" / "eiopa-2622.md").exists()
+    # ...and the sectoral CRD record landed under its own family
+    assert (tmp_path / "data" / "crd" / "eba-2013-9.md").exists()

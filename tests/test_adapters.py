@@ -3,7 +3,7 @@ from qa_mirror import eba, eiopa, esma
 from conftest import FakeHttp
 
 
-# --- EBA ----------------------------------------------------------------------
+# --- EBA (sectoral banking discovery + detail parse) --------------------------
 
 def test_eba_fetch_record(fixture_html):
     url = f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/2024_7242"
@@ -38,108 +38,22 @@ def test_eba_listing_pagination():
     def page_url(p):
         return f"{eba.BASE}/single-rule-book-qa/search?{q}&page={p}"
 
+    # Page 1 comes back empty mid-listing (a transient blip): the walk must NOT
+    # stop there — page 2 still carries a record. Only two consecutive barren
+    # pages (3 and 4) end it. This is the regression the fix guards against: a
+    # single empty page silently truncating the corpus.
     http = FakeHttp({
         page_url(0): f'<a href="{detail.format(1)}">x</a> <a href="{detail.format(2)}">y</a>',
         page_url(1): "<html>empty</html>",
+        page_url(2): f'<a href="{detail.format(3)}">z</a>',
+        page_url(3): "<html>empty</html>",
+        page_url(4): "<html>empty</html>",
     })
     urls = list(eba.list_detail_urls(http, {"legal_act_ids": [32]}))
-    assert urls == [eba.BASE + detail.format(1), eba.BASE + detail.format(2)]
+    assert urls == [eba.BASE + detail.format(n) for n in (1, 2, 3)]
 
 
-# --- EIOPA ----------------------------------------------------------------------
-
-def make_export_xlsx(rows):
-    import io
-
-    import openpyxl
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.append(["Question ID", "Submitted on", "Answered on", "Regulation Reference",
-               "QA Topic", "Article", "Template", "Question",
-               "Background of the question", "EIOPA Answer"])
-    for r in rows:
-        ws.append(r)
-    buf = io.BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
-
-
-def test_eiopa_listing_from_xlsx_export(fixture_html):
-    xlsx = make_export_xlsx([
-        # post-migration ID style; slug uses the compact form (3308-dora221)
-        ["3308 - DORA221", "2025-03-28", "2025-04-01",
-         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
-         "t", "3", "", "q", "", "a"],
-        # hyphenated slug variant (first candidate 404s, second resolves)
-        ["3476 - DORA-280", "2025-05-01", "2025-05-02",
-         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
-         "t", "5", "", "q", "", "a"],
-        # foreign act — filtered out by require_act_ref, never fetched
-        ["3374", "2025-06-26", "2025-07-01",
-         "(EU) No 2015/35 - supplementing Dir 2009/138/EC (SII)",
-         "t", "15", "", "q", "", "a"],
-        # pre-migration entry whose page is gone — warned about, skipped
-        ["2787 - DORA 011", "2024-12-06", "2024-12-07",
-         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
-         "t", "30", "", "q", "", "a"],
-    ])
-    detail = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
-    http = FakeHttp({
-        eiopa.EXPORT_URL: xlsx,
-        f"{detail}/3308-dora221_en": fixture_html("eiopa_detail.html"),
-        f"{detail}/3476-dora-280_en": fixture_html("eiopa_detail.html"),
-    })
-    urls = list(eiopa.list_detail_urls(http, {"require_act_ref": "2022/2554"}))
-    assert urls == [f"{detail}/3308-dora221_en", f"{detail}/3476-dora-280_en"]
-    assert not any("3374" in u for u in http.calls)  # foreign act never fetched
-    # resolution cached the pages: fetch_record must not re-download
-    n_calls = len(http.calls)
-    rec = eiopa.fetch_record(http, urls[0])
-    assert rec.qa_id == "2787 - DORA 011"  # from the fixture's metadata
-    assert len(http.calls) == n_calls
-
-
-def test_eiopa_transient_failure_skips_row_then_raises(fixture_html):
-    import requests
-    from types import SimpleNamespace
-
-    xlsx = make_export_xlsx([
-        ["3308 - DORA221", "2025-03-28", "2025-04-01",
-         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
-         "t", "3", "", "q", "", "a"],
-        ["3476 - DORA-280", "2025-05-01", "2025-05-02",
-         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
-         "t", "5", "", "q", "", "a"],
-    ])
-    detail = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
-    good = f"{detail}/3308-dora221_en"
-    flaky = f"{detail}/3476-dora280_en"  # first candidate slug for 3476
-
-    class FlakyEiopa(FakeHttp):
-        def get(self, url, **kw):
-            if "3476" in url:
-                self.calls.append(url)
-                raise requests.HTTPError("503", response=SimpleNamespace(status_code=503))
-            return super().get(url, **kw)
-
-    http = FlakyEiopa({eiopa.EXPORT_URL: xlsx, good: fixture_html("eiopa_detail.html")})
-    gen = eiopa.list_detail_urls(http, {"require_act_ref": "2022/2554"})
-    # the reachable record is yielded before the failure aborts nothing...
-    assert next(gen) == good
-    # ...and the transient failure surfaces as a listing error at the end
-    import pytest as _pytest
-    with _pytest.raises(RuntimeError, match="temporarily unreachable"):
-        list(gen)
-    assert flaky  # (name kept for clarity)
-
-
-def test_eiopa_slug_candidates():
-    assert eiopa._slug_candidates("3308 - DORA221")[0] == "3308-dora221"
-    assert "3476-dora-280" in eiopa._slug_candidates("3476 - DORA-280")
-    assert eiopa._slug_candidates("Dora 262 - 3419")[0] == "3419-dora262"
-    assert eiopa._slug_candidates("3374") == ["3374"]
-
+# --- EIOPA (detail parse for register-discovered joint Q&As) -------------------
 
 def test_eiopa_fetch_record(fixture_html):
     url = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database/2787_en"
@@ -175,164 +89,7 @@ def test_eiopa_joint_id_formats(fixture_html):
     assert rec.joint_id == ""
 
 
-# --- ESMA ----------------------------------------------------------------------
-
-def esma_listing_base():
-    return (
-        f"{esma.BASE}/esma-qa-search-page/final?field_qa_serial_value="
-        "&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010"
-        "&created%5Bmin%5D=&created%5Bmax%5D="
-    )
-
-
-FACET_ECHO = "field_qa_level1_target_id%5B0%5D=20010"
-
-
-def test_esma_listing_follows_only_advertised_pager_links():
-    base = esma_listing_base()
-    detail = '/publications-data/questions-answers/{}'
-    # page 0 advertises page 1; page 1 advertises page 0 back. A page=2 URL
-    # exists on the portal but serves an unfiltered default listing — the
-    # adapter must never request pages the pager does not advertise.
-    page0 = (f'<a href="{detail.format(2646)}">x</a>'
-             f'<a href="?{FACET_ECHO}&amp;page=1">2</a>')
-    page1 = (f'<a href="{detail.format(2103)}">y</a>'
-             f'<a href="?{FACET_ECHO}&amp;page=0">1</a>')
-    http = FakeHttp({base: page0, f"{base}&page=1": page1})
-    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
-    assert urls == [esma.BASE + detail.format(2646), esma.BASE + detail.format(2103)]
-    assert http.calls == [base, f"{base}&page=1"]  # nothing beyond the pager
-    # every listing request must carry the cache-bypass cookie
-    assert all("Cookie" in h for h in http.headers_sent)
-
-
-def test_esma_listing_single_page():
-    base = esma_listing_base()
-    http = FakeHttp({base: f'<a href="/publications-data/questions-answers/2356">x</a>'
-                           f'<a href="?{FACET_ECHO}">self</a>'})
-    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
-    assert urls == [f"{esma.BASE}/publications-data/questions-answers/2356"]
-
-
-class FlakyHttp:
-    """Serves a sequence of responses per URL — for cache-flakiness tests."""
-
-    def __init__(self, sequences: dict):
-        self.sequences = {k: list(v) for k, v in sequences.items()}
-        self.calls = []
-
-    def get(self, url, **kw):
-        self.calls.append(url)
-        seq = self.sequences[url]
-        from types import SimpleNamespace
-        return SimpleNamespace(text=seq.pop(0) if len(seq) > 1 else seq[0])
-
-
-def test_esma_listing_retries_unfiltered_cache_responses(monkeypatch):
-    from qa_mirror import common
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    base = esma_listing_base()
-    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
-    good = (f'<a href="/publications-data/questions-answers/2646">x</a>'
-            f'<a href="?{FACET_ECHO}">self</a>')
-    http = FlakyHttp({base: [junk, junk, good]})
-    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
-    # junk responses are never yielded; the retry eventually got the real page
-    assert urls == [f"{esma.BASE}/publications-data/questions-answers/2646"]
-
-
-def test_esma_falls_back_to_id_scan_when_listing_stays_unfiltered(
-    monkeypatch, fixture_html
-):
-    from qa_mirror import common
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    base = esma_listing_base()
-    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
-    detail = f"{esma.BASE}/publications-data/questions-answers"
-
-    class ScanHttp(FlakyHttp):
-        def __init__(self):
-            super().__init__({base: [junk]})
-            self.details = {
-                f"{detail}/2101": fixture_html("esma_detail.html"),
-                f"{detail}/2103": fixture_html("esma_detail.html"),
-            }
-
-        def get(self, url, **kw):
-            if url in self.details:
-                self.calls.append(url)
-                from types import SimpleNamespace
-                return SimpleNamespace(text=self.details[url])
-            if url.startswith(detail):
-                self.calls.append(url)
-                import requests
-                from types import SimpleNamespace
-                raise requests.HTTPError(
-                    "404", response=SimpleNamespace(status_code=404)
-                )
-            return super().get(url, **kw)
-
-    http = ScanHttp()
-    params = {"level1_ids": [20010], "id_scan_start": 2100, "id_scan_gap": 3}
-    urls = list(esma.list_detail_urls(http, params))
-    # junk listing never yielded anything; the scan found the two live pages
-    # and stopped after 3 consecutive missing IDs past the last hit
-    assert urls == [f"{detail}/2101", f"{detail}/2103"]
-    assert f"{detail}/2107" not in http.calls  # gap budget exhausted at 2106
-    # scan-fetched pages are cached: fetch_record must not re-download
-    n = len(http.calls)
-    rec = esma.fetch_record(http, urls[0])
-    assert rec.question
-    assert len(http.calls) == n
-
-
-def test_esma_id_scan_transient_error_does_not_end_scan_but_goes_red(
-    monkeypatch, fixture_html
-):
-    import pytest as _pytest
-
-    from qa_mirror import common
-    monkeypatch.setattr(common.time, "sleep", lambda s: None)
-    base = esma_listing_base()
-    junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
-    detail = f"{esma.BASE}/publications-data/questions-answers"
-
-    class ScanHttp(FlakyHttp):
-        def __init__(self):
-            super().__init__({base: [junk]})
-            self.live = {
-                f"{detail}/2101": fixture_html("esma_detail.html"),
-                f"{detail}/2105": fixture_html("esma_detail.html"),
-            }
-            self.flaky = f"{detail}/2103"  # a 503 in the middle of the scan
-
-        def get(self, url, **kw):
-            from types import SimpleNamespace
-
-            import requests
-            if url in self.live:
-                self.calls.append(url)
-                return SimpleNamespace(text=self.live[url])
-            if url == self.flaky:
-                self.calls.append(url)
-                raise requests.HTTPError("503", response=SimpleNamespace(status_code=503))
-            if url.startswith(detail):
-                self.calls.append(url)
-                raise requests.HTTPError("404", response=SimpleNamespace(status_code=404))
-            return super().get(url, **kw)
-
-    http = ScanHttp()
-    params = {"level1_ids": [20010], "id_scan_start": 2100, "id_scan_gap": 3}
-    gen = esma.list_detail_urls(http, params)
-    got = []
-    with _pytest.raises(RuntimeError, match="temporarily unreachable"):
-        for u in gen:
-            got.append(u)
-    # the 503 at 2103 did NOT count toward the gap or stop the scan — 2105 was
-    # still reached — but it does make the run go red at the end
-    assert got == [f"{detail}/2101", f"{detail}/2105"]
-    assert f"{detail}/2105" in http.calls
-
+# --- ESMA (detail parse for register-discovered joint Q&As) -------------------
 
 def test_esma_fetch_record(fixture_html):
     url = f"{esma.BASE}/publications-data/questions-answers/2356"
