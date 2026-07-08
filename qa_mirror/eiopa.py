@@ -62,15 +62,17 @@ def _slug_candidates(qid: str) -> list[str]:
 
 
 def _resolve_detail_url(http: Http, qid: str) -> str | None:
+    """Resolve a Question ID to a live detail URL, or None if every candidate
+    slug returns a hard 404 (the entry has no live page). A non-404 error
+    (throttling, flaky origin) is left to propagate — the caller distinguishes
+    "genuinely absent" (None) from "temporarily unreachable" (raise), because
+    treating the latter as absent once made a throttled streak skip 26
+    resolvable records and would have delisted them."""
     for slug in _slug_candidates(qid):
         url = f"{BASE}/qa-regulation/questions-and-answers-database/{slug}_en"
         try:
             html = http.get(url).text
         except requests.HTTPError as exc:
-            # Only a real 404 means "this candidate slug does not exist".
-            # Anything else (throttling, flaky origin) propagates and fails
-            # the listing — a run once treated a throttled streak as "page
-            # gone" and skipped 26 resolvable records.
             if exc.response is not None and exc.response.status_code == 404:
                 continue
             raise
@@ -88,18 +90,34 @@ def list_detail_urls(http: Http, params: dict, max_pages: int = 0):
     qid_col = header.index("question id")
     ref_col = header.index("regulation reference")
     ref_filter = str(params.get("require_act_ref", "") or "")
+    # A transient failure on one detail page must not abort the whole listing
+    # (that once cut a run from 110 rows to 31): yield every record we can
+    # reach, then raise at the end so the run goes red and delisting is
+    # suppressed — the missed records simply refresh on the next delta run.
+    transient = 0
     for row in rows:
         qid = str(row[qid_col] or "").strip()
         ref = str(row[ref_col] or "")
         if not qid or (ref_filter and ref_filter not in ref):
             continue
-        url = _resolve_detail_url(http, qid)
+        try:
+            url = _resolve_detail_url(http, qid)
+        except requests.RequestException as exc:
+            transient += 1
+            print(f"[eiopa] WARNING: transient failure on {qid!r} ({exc}), skipping",
+                  file=sys.stderr)
+            continue
         if url:
             yield url
         else:
-            # not fatal by itself — pre-migration entries in the export have no
-            # live page; anything previously mirrored is caught by delisting
+            # pre-migration entries in the export have no live page; anything
+            # previously mirrored is caught by delisting
             print(f"[eiopa] WARNING: no detail page found for {qid!r}", file=sys.stderr)
+    if transient:
+        raise RuntimeError(
+            f"{transient} detail page(s) temporarily unreachable — listing "
+            "incomplete this run (records already reached were written)"
+        )
 
 
 def fetch_record(http: Http, url: str) -> Record:

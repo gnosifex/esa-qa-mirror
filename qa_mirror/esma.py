@@ -84,21 +84,33 @@ def _id_scan(http: Http, params: dict, yielded: set):
     i = int(params.get("id_scan_start", 2100))
     max_gap = int(params.get("id_scan_gap", 50))
     gap = 0
+    transient = 0
     while gap < max_gap:
         url = f"{BASE}/publications-data/questions-answers/{i}"
         i += 1
         try:
             html = http.get(url).text
         except requests.HTTPError as exc:
-            # only a hard 404 counts as a hole in the ID space
+            # Only a hard 404 is a real hole in the ID space and counts toward
+            # the stop gap. A transient error leaves that ID unknown: skip it
+            # without advancing the gap (so the scan still reaches the end),
+            # and go red at the end rather than abort mid-scan.
             if exc.response is not None and exc.response.status_code == 404:
                 gap += 1
                 continue
-            raise
+            transient += 1
+            print(f"[esma] WARNING: transient failure on id {i - 1} ({exc}), skipping",
+                  file=sys.stderr)
+            continue
         gap = 0
         _page_cache[url] = html
         if url not in yielded:
             yield url
+    if transient:
+        raise RuntimeError(
+            f"{transient} detail page(s) temporarily unreachable during ID scan "
+            "— listing incomplete this run (records already reached were written)"
+        )
 
 
 def _field(doc, name: str) -> str:
