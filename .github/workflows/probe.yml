@@ -18,28 +18,49 @@ jobs:
     env:
       UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
     steps:
-      - name: EIOPA listing (DORA + Final facets)
+      - name: EIOPA listing, DORA facet only (user-verified browser URL)
         run: |
-          url="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489&f%5B1%5D=status%3AFinal&page=0"
-          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
-          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
+          url="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
+          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
           echo "detail links:"
-          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -40 || echo "NONE"
-          echo "facet echo in page:"
-          grep -c 'regulation_reference' page.html || true
-      - name: EIOPA detail of a record delisted by the 09:30 run
+          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -15 || echo "NONE"
+          echo "known out-of-scope IDs present (3568=RFR, 3077=SII → facet ignored):"
+          grep -c 'database/3568_en\|database/3077_en' page.html || true
+      - name: EIOPA detail markup of a listed record
         run: |
-          curl -sS -A "$UA" "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2787_en" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
-          grep -o 'Question ID[^<]*<b>[^<]*' d.html | head -2 || echo "no Question ID markup"
-      - name: ESMA listing (DORA facet)
+          link=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | head -1 | sed 's/href="//;s/"//')
+          echo "fetching: $link"
+          curl -sS -A "$UA" "https://www.eiopa.europa.eu$link" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+          echo "metadata labels found:"
+          grep -o -i 'question id\|regulation reference\|topic\|status\|date of submission' d.html | sort | uniq -c | head
+          echo "p>b metadata sample:"
+          grep -o '<p[^>]*>[^<]*:\s*<b>[^<]*</b>' d.html | head -8 || echo "no p>b metadata"
+          echo "headings:"
+          grep -o '<h[1-6][^>]*>[^<]\{1,80\}' d.html | head -10
+      - name: EIOPA XLSX export (found by the user on the portal)
         run: |
-          url="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_level1_target_id%5B0%5D=20010&page=0"
-          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
-          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
-          echo "detail links:"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -40 || echo "NONE"
-      - name: ESMA detail of a record delisted by the 09:30 run
-        run: |
-          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
+          curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx?prefLang=en" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n" || true
+          file qa.xlsx
+          pip install -q openpyxl 2>/dev/null | tail -1 || true
+          python3 - <<'EOF'
+          import openpyxl
+          wb = openpyxl.load_workbook("qa.xlsx", read_only=True)
+          for ws in wb.worksheets:
+              print(f"sheet: {ws.title!r}, dims: {ws.calculate_dimension()}")
+          ws = wb.worksheets[0]
+          rows = ws.iter_rows(values_only=True)
+          header = next(rows)
+          print("columns:", [str(c)[:40] for c in header])
+          n = dora = 0
+          sample = []
+          for r in rows:
+              n += 1
+              joined = " | ".join(str(c)[:60] for c in r if c is not None)
+              if "2554" in joined or "DORA" in joined.upper():
+                  dora += 1
+                  if len(sample) < 2:
+                      sample.append(joined[:600])
+          print(f"data rows: {n}, DORA-ish rows: {dora}")
+          for s in sample:
+              print("SAMPLE:", s)
+          EOF
