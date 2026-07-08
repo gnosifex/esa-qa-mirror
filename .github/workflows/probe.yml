@@ -50,6 +50,34 @@ jobs:
             curl -sS -A "$UA" "$base&page=$p" -o e2.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
             grep -o 'href="/publications-data/questions-answers/[0-9]*"' e2.html | sort -u | head -25 || echo "NONE"
           done
+      - name: ESMA results shell analysis (JS-rendered? other link scheme? AJAX endpoint?)
+        run: |
+          base="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
+          curl -sS -A "$UA" "$base" -o shell.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+          echo "== all qa/question-ish hrefs:"
+          grep -oE 'href="[^"]*(qa|question)[^"]*"' shell.html | sort | uniq -c | sort -rn | head -25
+          echo "== drupal views config:"
+          grep -oE '"view_name":"[^"]*"|"view_display_id":"[^"]*"|"view_args":"[^"]*"|"view_path":"[^"]*"' shell.html | sort -u | head
+          grep -c 'views/ajax' shell.html || true
+          echo "== api-ish URLs in scripts:"
+          grep -oE '"(https?:)?//[^"]*(api|search|solr|elastic)[^"]*"' shell.html | sort -u | head -10
+          echo "== result-count markers:"
+          grep -oE '[0-9]+ (results|questions)' shell.html | head -3 || true
+          echo "== data attributes of the results container:"
+          grep -oE '<div[^>]*(view|search|result)[^>]*>' shell.html | head -8
+      - name: ESMA views/ajax replay attempt
+        run: |
+          grep -oE '"view_name":"[^"]*","view_display_id":"[^"]*"[^}]*' shell.html | head -2 > cfg.txt || true
+          cat cfg.txt
+          vn=$(grep -oE '"view_name":"[^"]*"' shell.html | head -1 | cut -d'"' -f4)
+          vd=$(grep -oE '"view_display_id":"[^"]*"' shell.html | head -1 | cut -d'"' -f4)
+          echo "view_name=$vn display=$vd"
+          if [ -n "$vn" ]; then
+            curl -sS -A "$UA" "https://www.esma.europa.eu/views/ajax" \
+              --data "view_name=$vn&view_display_id=$vd&field_qa_level1_target_id%5B%5D=20010&page=0" \
+              -H "X-Requested-With: XMLHttpRequest" -o ajax.json -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+            grep -o 'publications-data/questions-answers/[0-9]*' ajax.json | sort -u | head -20 || echo "no links in ajax response"
+          fi
       - name: ESMA detail markup check (known record 2103)
         run: |
           curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o e3.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
