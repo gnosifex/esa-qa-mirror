@@ -43,12 +43,18 @@ class RegisterError(RuntimeError):
     rather than proceed on a partial/garbled list."""
 
 
-# PowerBI's public backend spuriously rejects otherwise-valid requests during
-# session warm-up — a 400/429/5xx on one call, then success on an identical
-# retry (observed live: conceptualschema 400 on a run whose neighbours all
-# succeeded). So retry these transiently, not just network errors.
+# PowerBI's public backend spuriously rejects otherwise-valid requests in
+# bursts — the conceptualschema call was seen 400ing for tens of seconds on one
+# run, then answering 200 on the first try minutes later (identical request).
+# The bursts outlast a short retry, so retry generously with capped backoff to
+# ride them out; 400/429/5xx and network errors are all treated as transient.
 _RETRYABLE_STATUS = (400, 408, 429, 500, 502, 503, 504)
-_RETRIES = 3
+_RETRIES = 6
+_BACKOFF_CAP = 30
+
+
+def _backoff(attempt: int) -> int:
+    return min(_BACKOFF_CAP, 3 * 2**attempt)
 
 
 def _pbi(session: requests.Session, path: str, payload=None):
@@ -61,20 +67,20 @@ def _pbi(session: requests.Session, path: str, payload=None):
             else:
                 resp = session.post(url, headers=headers, json=payload, timeout=60)
             if resp.status_code in _RETRYABLE_STATUS and attempt < _RETRIES:
-                backoff = 2 * 2**attempt
+                wait = _backoff(attempt)
                 print(f"[register] {resp.status_code} for {path} — retrying in "
-                      f"{backoff}s", file=sys.stderr)
-                time.sleep(backoff)
+                      f"{wait}s", file=sys.stderr)
+                time.sleep(wait)
                 continue
             resp.raise_for_status()
             return resp.json()  # requests transparently gunzips
         except (requests.RequestException, ValueError) as exc:
             if attempt >= _RETRIES:
                 raise RegisterError(f"PowerBI {path} failed: {exc}") from exc
-            backoff = 2 * 2**attempt
+            wait = _backoff(attempt)
             print(f"[register] {type(exc).__name__} for {path} — retrying in "
-                  f"{backoff}s", file=sys.stderr)
-            time.sleep(backoff)
+                  f"{wait}s", file=sys.stderr)
+            time.sleep(wait)
     raise RegisterError(f"PowerBI {path} failed after {_RETRIES} retries")
 
 

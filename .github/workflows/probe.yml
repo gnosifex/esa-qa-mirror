@@ -64,6 +64,14 @@ jobs:
               if cs.status_code == 200:
                   break
           PY
+      - name: EBA Single Rulebook search — facet 32 (CRD) per-page link counts
+        run: |
+          for p in 0 1 2 3 4 5 6 7 8 9; do
+            url="https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32&page=$p"
+            curl -sS -A "$UA" "$url" -o e.html -w "page $p: HTTP %{http_code}, %{size_download} bytes"
+            n=$(grep -oE 'single-rule-book-qa/qna/view/publicId/[0-9_]+' e.html | sort -u | wc -l)
+            echo ", $n detail links"
+          done
       - name: EIOPA XLSX export (the listing source)
         run: |
           curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
