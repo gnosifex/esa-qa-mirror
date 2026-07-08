@@ -8,9 +8,16 @@ on:
 permissions:
   contents: write
 
+# Never two mirror runs at once (manual dispatch vs cron) — they would race
+# on the state.json/data commit.
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
 jobs:
   mirror:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       # Pinned to full commit SHAs (repo setting "Require actions to be pinned
       # to a full-length commit SHA"). Update SHAs deliberately when bumping.
@@ -18,8 +25,15 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+          cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m qa_mirror
+      # Partial failures must not lose the successful part: the mirror step is
+      # decoupled from the commit step and its outcome re-raised at the end,
+      # so the run still commits what it got but ends red on any error.
+      - name: Mirror
+        id: mirror
+        continue-on-error: true
+        run: python -m qa_mirror
       - run: python -m qa_mirror.site
       - name: Commit changes
         run: |
@@ -28,4 +42,10 @@ jobs:
           git add data state.json docs
           git diff --cached --quiet && echo "no changes" && exit 0
           git commit -m "mirror: $(date -u +%F) delta"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
+      - name: Fail on mirror errors
+        if: steps.mirror.outcome == 'failure'
+        run: |
+          echo "mirror run reported errors — see the Mirror step log and job summary"
+          exit 1
