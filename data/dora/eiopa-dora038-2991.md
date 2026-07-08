@@ -10,9 +10,8 @@ topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "14 Feb 2024"
 date_date_of_submission_iso: "2024-02-14"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora038-2991_en"
-retrieved_at: "2026-07-08T01:38:49+00:00"
+retrieved_at: "2026-07-08T11:50:26+00:00"
 ---
 
 # EIOPA Q&A DORA038 - 2991

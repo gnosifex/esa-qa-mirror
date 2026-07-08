@@ -10,9 +10,8 @@ topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "07 Sep 2023"
 date_date_of_submission_iso: "2023-09-07"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2787-dora011_en"
-retrieved_at: "2026-07-08T01:39:14+00:00"
+retrieved_at: "2026-07-08T11:51:16+00:00"
 ---
 
 # EIOPA Q&A 2787 - DORA011
@@ -20,6 +19,10 @@ retrieved_at: "2026-07-08T01:39:14+00:00"
 ## Question
 
 Is it possible for an entity to have two different size classifications – one under DORA and one under Commission Recommendation 2002/361/EC? For example, an enterprise that employs 3 persons and has an annual turnover and/or annual balance sheet value of EUR 9 million would be considered as a medium enterprise in the DORA Regulation; whereas the same enterprise would be considered as a small enterprise under Commission Recommendation 2002/361/EC.
+
+## Background
+
+Under the thresholds provided by the DORA Regulation, an enterprise that employs 3 persons and has an annual turnover and/or annual balance sheet value of EUR 9 million would be considered as a medium enterprise in the DORA Regulation. However, an enterprise that employs 11 persons and has an annual turnover and/or annual balance sheet value of EUR 9 million would be considered a small enterprise under the DORA Regulation. We have not been able to understand the rationale/logic behind this. In relation to the Commission Recommendation 2002/361/EC, we have identified scenarios – other than those relating to trading venues, central counterparties, trade repositories and central securities depositories – in which entities which fall under a specific size threshold pursuant to DORA would be considered to have a different size pursuant in relation to the thresholds defined in Commission Recommendation. As a way of example, an enterprise that employs 3 persons and has an annual turnover and/or annual balance sheet value of EUR 9 million would be considered as a medium enterprise in the DORA Regulation; whereas the same enterprise would be considered as a small enterprise under Commission Recommendation. In view of the above, we would like to obtain clarity on whether the above is indeed correct and intentional. Furthermore, we would also like to confirm whether an entity can have two different size-classifications – one under DORA and one under Commission Regulation.
 
 ## Answer
 

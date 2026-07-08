@@ -10,9 +10,8 @@ topic: "ICT third-party risk management (DORA)"
 status: "Final"
 date_date_of_submission: "25 Jul 2025"
 date_date_of_submission_iso: "2025-07-25"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-252-3392_en"
-retrieved_at: "2026-07-08T01:38:46+00:00"
+retrieved_at: "2026-07-08T11:41:49+00:00"
 ---
 
 # EIOPA Q&A DORA 252 - 3392
@@ -20,6 +19,10 @@ retrieved_at: "2026-07-08T01:38:46+00:00"
 ## Question
 
 Is it in line with Article 30(3)(e)(i) of Regulation (EU) 2022/2554 (DORA), in conjunction with Article 8 of Commission Delegated Regulation (EU) 2024/1773, to appoint an independent third party to perform a regular joint audit of a third-party ICT service provider that supports critical or important functions, and would such an arrangement satisfy DORA requirements such that individual audits by each financial entity would not be required under normal circumstances in situation, when final selection of the audit company will be approved by the General Meeting of ICT service provider, which is composed of representatives of financial entities that are the sole owners of this ICT service provider?
+
+## Background
+
+According to Article 30(3)(e)(i) of DORA, contractual arrangements between financial entities and third-party ICT service providers supporting critical or important functions must include, among other things, the right for the financial entity to monitor the performance of the ICT services on an ongoing basis through access for inspection and audit, either by the financial entity itself or by an appointed third party. This provision is further detailed in Article 8 of Commission Delegated Regulation (EU) 2024/1773, which outlines specific forms of audit and monitoring to be included in the financial entity's policy on outsourcing of critical or important ICT services. In particular, Article 8(2)(b) allows for joint audits or joint testing exercises organised by multiple financial entities using the same ICT provider, carried out by the entities themselves or by a third party appointed by them. The regulation thus appears to provide financial institutions with flexibility in choosing the method of audit, including the possibility of appointing an independent third party to conduct a regular joint audit on their behalf. However, clarity is sought on whether, in such a case, DORA requirements are fully met and whether the appointment of such a third party relieves each financial entity of the obligation to perform a separate audit, assuming that each institution retains the right to conduct its own audit in exceptional circumstances (e.g. in response to a major incident or operational disruption), especially in situation, when final selection of the audit company will be approved by the General Meeting of ICT service provider, which is composed of representatives of financial entities that are the sole owners of this ICT service provider.
 
 ## Answer
 

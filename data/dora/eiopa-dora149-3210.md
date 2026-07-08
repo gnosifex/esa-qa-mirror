@@ -10,9 +10,8 @@ topic: "ICT third-party risk management (DORA)"
 status: "Final"
 date_date_of_submission: "13 Dec 2024"
 date_date_of_submission_iso: "2024-12-13"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora149-3210_en"
-retrieved_at: "2026-07-08T01:39:03+00:00"
+retrieved_at: "2026-07-08T11:46:18+00:00"
 ---
 
 # EIOPA Q&A DORA149 - 3210
@@ -20,6 +19,10 @@ retrieved_at: "2026-07-08T01:39:03+00:00"
 ## Question
 
 We were approached by representatives of the major ISPs in AT. They expressed concern about divulging their sub-contractors, as the information is currently not public and could be actionable by potential attackers. Should these sub-contractors indeed be disclosed by the ISPs to a large number of financial undertakings?
+
+## Background
+
+The sub-contractors clearly seem to provide DORA-relevant ICT-services and therefore, going by DORA Article 28 would need to be included in the registers of information and disclosed to financial undertakings. Some of these sub-providers might also be candidates for a designation as CTPP, therefore an inclusion might indeed make sense. However, as the security argument cannot simply brushed aside without due consideration and the ISPs are critical infrastructure for everyone, not only the financial sector, guidance on European level would be very welcome.
 
 ## Answer
 

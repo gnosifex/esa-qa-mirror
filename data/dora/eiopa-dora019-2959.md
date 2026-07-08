@@ -10,9 +10,8 @@ topic: "Other DORA topics"
 status: "Final"
 date_date_of_submission: "18 Jan 2024"
 date_date_of_submission_iso: "2024-01-18"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora019-2959_en"
-retrieved_at: "2026-07-08T01:38:56+00:00"
+retrieved_at: "2026-07-08T11:51:06+00:00"
 ---
 
 # EIOPA Q&A DORA019 - 2959
@@ -20,6 +19,10 @@ retrieved_at: "2026-07-08T01:38:56+00:00"
 ## Question
 
 I analyzed DORA and I have a couple of questions: 1. Can you share a definition of what DORA understand by "function"? 2. May you share several examples of functions that must be mapped with assets ITC, vendors and ITC services?
+
+## Background
+
+To understand the meaning of the main concepts of DORA
 
 ## Answer
 

@@ -10,9 +10,8 @@ topic: "ICT risk management (DORA)"
 status: "Final"
 date_date_of_submission: "07 Aug 2023"
 date_date_of_submission_iso: "2023-08-07"
-x_delisted: "2026-07-08"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2750-dora006_en"
-retrieved_at: "2026-07-08T01:39:13+00:00"
+retrieved_at: "2026-07-08T11:51:32+00:00"
 ---
 
 # EIOPA Q&A 2750 - DORA006
@@ -20,6 +19,10 @@ retrieved_at: "2026-07-08T01:39:13+00:00"
 ## Question
 
 What is the level of engagement required for an ICT service to be considered as “support[ing] critical or important functions”?
+
+## Background
+
+Various articles of DORA refer a qualified type of ICT services: ICT services supporting critical or important functions. Supporting is an unspecific term that could be understood to commence with any active use of an ICT system by a critical or important function without a requirement of a certain intensity threshold being exceeded. Presumably, the qualification and additional requirements are only justified if a certain level of dependency of critical or important functions on the ICT service exists.
 
 ## Answer
 
