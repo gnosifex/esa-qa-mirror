@@ -125,6 +125,44 @@ def test_require_status_skips_and_delists(root):
     assert not (root / "data" / "dora" / "good-2.md").exists()
 
 
+def test_mass_delisting_is_refused_and_reported(root, capsys):
+    recs = [rec("good", str(i)) for i in range(8)]
+    assert run(root, {"good": make_adapter(recs)}) == 0
+    # broken listing filter: suddenly no known record is listed
+    assert run(root, {"good": make_adapter([])}) == 1
+    assert "implausible listing" in capsys.readouterr().err
+    for i in range(8):
+        assert "x_delisted" not in (root / "data" / "dora" / f"good-{i}.md").read_text(
+            encoding="utf-8")
+    # explicit override marks them and exits clean
+    assert run(root, {"good": make_adapter([])}, "--allow-mass-delisting") == 0
+    for i in range(8):
+        assert "x_delisted" in (root / "data" / "dora" / f"good-{i}.md").read_text(
+            encoding="utf-8")
+
+
+def test_single_delisting_passes_the_plausibility_brake(root):
+    recs = [rec("good", str(i)) for i in range(6)]
+    run(root, {"good": make_adapter(recs)})
+    assert run(root, {"good": make_adapter(recs[1:])}) == 0
+    assert "x_delisted" in (root / "data" / "dora" / "good-0.md").read_text(encoding="utf-8")
+    assert "x_delisted" not in (root / "data" / "dora" / "good-1.md").read_text(encoding="utf-8")
+
+
+def test_require_act_ref_skips_foreign_records(root):
+    (root / "config.yaml").write_text(
+        "delay_seconds: 0\nacts: {}\ngood:\n  require_act_ref: \"2022/2554\"\n",
+        encoding="utf-8",
+    )
+    dora = rec("good", "1", legal_act_raw="Regulation (EU) 2022/2554 (DORA)")
+    foreign = rec("good", "2", legal_act_raw="(EU) 2023/894 - some Solvency II ITS")
+    unparseable = rec("good", "3", legal_act_raw="Risk-Free Interest Rate")
+    assert run(root, {"good": make_adapter([dora, foreign, unparseable])}) == 0
+    assert (root / "data" / "dora" / "good-1.md").exists()
+    assert not list((root / "data").glob("*/good-2.md"))
+    assert not list((root / "data").glob("*/good-3.md"))
+
+
 def test_delisting_needs_prior_state(root, tmp_path):
     # a record written earlier whose status left the mirrored set gets marked
     r1, r2 = rec("good", "1"), rec("good", "2")

@@ -44,6 +44,11 @@ def main(argv=None) -> int:
     ap.add_argument("--authority", default="all", choices=["all", *ADAPTERS])
     ap.add_argument("--limit", type=int, default=0, help="max records per authority (0 = no limit)")
     ap.add_argument("--full", action="store_true", help="rewrite all records, not only new/changed")
+    ap.add_argument(
+        "--allow-mass-delisting",
+        action="store_true",
+        help="permit marking more than the plausibility threshold of an authority's records as delisted",
+    )
     ap.add_argument("--root", default=".", help="repo root (default: cwd)")
     args = ap.parse_args(argv)
 
@@ -81,6 +86,10 @@ def main(argv=None) -> int:
                     if req and req.lower() not in rec.status.lower():
                         print(f"[{auth}] skip {rec.slug()} (status: {rec.status!r})")
                         continue
+                    req_ref = str(params.get("require_act_ref", "") or "")
+                    if req_ref and rec.legal_act_ref != f"(EU) {req_ref}":
+                        print(f"[{auth}] skip {rec.slug()} (act: {rec.legal_act_raw!r})")
+                        continue
                     seen_keys.add(state.key(rec))
                     rec.retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
                     if args.full or state.is_new_or_changed(rec):
@@ -101,14 +110,30 @@ def main(argv=None) -> int:
         # to conclude "gone" from a complete, error-free pass: --limit truncates
         # the listing, and a fetch error hides that record's key from seen_keys.
         if listing_ok and errors == 0 and not args.limit:
-            for key in sorted(state.data["records"]):
-                if not key.startswith(f"{auth}:") or key in seen_keys:
-                    continue
-                path = common.mark_file_delisted(root, key, today)
-                if path:
-                    state.mark_delisted(key)
-                    delisted += 1
-                    print(f"[{auth}] delisted {key} → marked {path.relative_to(root)}")
+            known = sorted(
+                k for k in state.data["records"] if k.startswith(f"{auth}:")
+            )
+            missing = [k for k in known if k not in seen_keys]
+            # Plausibility brake: losing a large share of the corpus at once
+            # means a broken listing filter, not mass withdrawal (seen live:
+            # a portal migration made the facet params no-ops and one run
+            # "delisted" every known record). Refuse and go red instead.
+            threshold = max(5, len(known) // 5)
+            if len(missing) > threshold and not args.allow_mass_delisting:
+                print(
+                    f"[{auth}] ERROR: implausible listing — {len(missing)} of "
+                    f"{len(known)} known records missing; delisting skipped. "
+                    "Check the portal/facets; --allow-mass-delisting overrides.",
+                    file=sys.stderr,
+                )
+                errors += 1
+            else:
+                for key in missing:
+                    path = common.mark_file_delisted(root, key, today)
+                    if path:
+                        state.mark_delisted(key)
+                        delisted += 1
+                        print(f"[{auth}] delisted {key} → marked {path.relative_to(root)}")
         totals[auth] = {"seen": n, "written": written, "errors": errors, "delisted": delisted}
 
     state.save()
