@@ -50,6 +50,19 @@ jobs:
             curl -sS -A "$UA" "$base&page=$p" -o e2.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
             grep -o 'href="/publications-data/questions-answers/[0-9]*"' e2.html | sort -u | head -25 || echo "NONE"
           done
+      - name: ESMA final tab, full exposed-form params, indexed facet, paged
+        run: |
+          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
+          for p in "" "&page=0" "&page=1"; do
+            echo "--- final params='$p'"
+            curl -sS -A "$UA" "$base$p" -o f.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+            grep -o 'href="/publications-data/questions-answers/[0-9]*"' f.html | sort -u | head -15 || echo "NONE"
+          done
+      - name: ESMA all tab page 2 (portal's own pager URL style)
+        run: |
+          url="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D=&page=2"
+          curl -sS -A "$UA" "$url" -o a2.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+          grep -o 'href="/publications-data/questions-answers/[0-9]*"' a2.html | sort -u | head -15 || echo "NONE"
       - name: ESMA results shell analysis (JS-rendered? other link scheme? AJAX endpoint?)
         run: |
           base="https://www.esma.europa.eu/esma-qa-search-page/all?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
