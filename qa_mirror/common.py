@@ -95,7 +95,9 @@ def iter_pager_listing(
     the query string and serve an unfiltered page: an invalid response is
     retried up to `retries` times, then the listing FAILS (RuntimeError) —
     importing from an unfiltered page silently pollutes the corpus, so
-    fail-closed is the only safe reaction.
+    fail-closed is the only safe reaction. The bad windows have been observed
+    to last minutes, so retries back off up to several minutes (a mirror run
+    has hours of headroom; a red run costs a week until the next cron).
     """
     seen = set()
     known_pages = {0}
@@ -116,11 +118,15 @@ def iter_pager_listing(
             html = http.get(url_for(page), headers=headers or {}).text
             if validate is None or validate(html):
                 break
+            wait = min(240, 15 * 2**attempt)
             print(
                 f"[{tag}] listing page {page} failed validation "
-                f"(attempt {attempt + 1}/{retries + 1}) — unfiltered cache response?",
+                f"(attempt {attempt + 1}/{retries + 1}) — unfiltered cache "
+                f"response? retrying in {wait}s",
                 file=sys.stderr,
             )
+            if attempt < retries:
+                time.sleep(wait)
         else:
             raise RuntimeError(
                 f"listing page {page} kept failing validation — the portal is "

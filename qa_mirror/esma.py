@@ -63,7 +63,14 @@ def fetch_record(http: Http, url: str) -> Record:
     doc = soup(http.get(url).text)
     rec = Record(authority="esma", qa_id=url.rsplit("/", 1)[-1], source_url=url)
     rec.topic = _field(doc, "field-qa-subject-matter")
-    rec.legal_act_raw = _field(doc, "field-qa-legal-act") or _field(doc, "field-legal-act")
+    # Since the 2026 migration the level-1 act is exposed as field-qa-level1
+    # (e.g. "Regulation (EU) 2022/2554 - The Digital Operational Resilience
+    # Act (DORA)") — the old field names are kept as fallbacks.
+    rec.legal_act_raw = (
+        _field(doc, "field-qa-level1")
+        or _field(doc, "field-qa-legal-act")
+        or _field(doc, "field-legal-act")
+    )
     rec.article = _field(doc, "field-qa-article") or _field(doc, "field-article")
     info = doc.find("div", class_="additionalinfo")
     if info:
