@@ -110,8 +110,14 @@ def main(argv=None) -> int:
         # to conclude "gone" from a complete, error-free pass: --limit truncates
         # the listing, and a fetch error hides that record's key from seen_keys.
         if listing_ok and errors == 0 and not args.limit:
+            # Already-delisted keys are excluded: they are accounted for and —
+            # after a portal migration changes all record IDs — would otherwise
+            # trip the brake on every future run forever.
             known = sorted(
-                k for k in state.data["records"] if k.startswith(f"{auth}:")
+                k
+                for k, h in state.data["records"].items()
+                if k.startswith(f"{auth}:")
+                and not h.startswith(common.DELISTED_HASH_PREFIX)
             )
             missing = [k for k in known if k not in seen_keys]
             # Plausibility brake: losing a large share of the corpus at once

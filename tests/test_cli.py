@@ -139,6 +139,9 @@ def test_mass_delisting_is_refused_and_reported(root, capsys):
     for i in range(8):
         assert "x_delisted" in (root / "data" / "dora" / f"good-{i}.md").read_text(
             encoding="utf-8")
+    # already-delisted keys must not keep tripping the brake on later runs
+    # (post-migration corpora would otherwise stay red forever)
+    assert run(root, {"good": make_adapter([])}) == 0
 
 
 def test_single_delisting_passes_the_plausibility_brake(root):

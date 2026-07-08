@@ -1,10 +1,9 @@
 name: probe
 
-# Manual diagnostic: fetch the portal listing/detail pages exactly as the
-# mirror would and print what the Actions runner actually receives (status,
-# size, title, detail-link counts). Use when a mirror run delists or imports
-# implausibly — distinguishes portal changes from runner-specific responses
-# (bot detection, geo walls).
+# Manual diagnostics for the portal adapters. Use when a mirror run delists
+# or imports implausibly — distinguishes portal changes from runner-specific
+# responses (the 2026-07 portal migrations exposed cache nodes that randomly
+# ignore query strings; see qa_mirror/eiopa.py and qa_mirror/esma.py).
 
 on:
   workflow_dispatch: {}
@@ -12,34 +11,40 @@ on:
 permissions: {}
 
 jobs:
+  # End-to-end smoke test of the actual adapters against the live portals
+  # (throwaway workspace — nothing is committed).
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m qa_mirror --authority esma --limit 5
+      - run: python -m qa_mirror --authority eiopa --limit 5
+      - run: python -m qa_mirror --authority eba --limit 5
+
+  # Raw looks at what the portals serve this runner.
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
     steps:
-      - name: EIOPA listing (DORA + Final facets)
+      - name: EIOPA XLSX export (the listing source)
         run: |
-          url="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489&f%5B1%5D=status%3AFinal&page=0"
-          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
-          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
+          curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
+          file qa.xlsx
+      - name: ESMA listing (cookie bypass + full exposed-form params)
+        run: |
+          base="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_serial_value=&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010&created%5Bmin%5D=&created%5Bmax%5D="
+          curl -sS -A "$UA" -H "Cookie: esa_qa_mirror=1" "$base" -o page.html -w "HTTP %{http_code}, %{size_download} bytes\n"
           echo "detail links:"
-          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -40 || echo "NONE"
-          echo "facet echo in page:"
-          grep -c 'regulation_reference' page.html || true
-      - name: EIOPA detail of a record delisted by the 09:30 run
-        run: |
-          curl -sS -A "$UA" "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2787_en" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
-          grep -o 'Question ID[^<]*<b>[^<]*' d.html | head -2 || echo "no Question ID markup"
-      - name: ESMA listing (DORA facet)
-        run: |
-          url="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_level1_target_id%5B0%5D=20010&page=0"
-          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
-          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
-          echo "detail links:"
-          grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -40 || echo "NONE"
-      - name: ESMA detail of a record delisted by the 09:30 run
-        run: |
-          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
-          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
+          grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -15 || echo "NONE"
+          echo "pager pages advertised:"
+          grep -oE '[?&;]page=[0-9]+' page.html | sort -u | head -8 || echo "none"

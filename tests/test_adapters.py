@@ -48,6 +48,65 @@ def test_eba_listing_pagination():
 
 # --- EIOPA ----------------------------------------------------------------------
 
+def make_export_xlsx(rows):
+    import io
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Question ID", "Submitted on", "Answered on", "Regulation Reference",
+               "QA Topic", "Article", "Template", "Question",
+               "Background of the question", "EIOPA Answer"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_eiopa_listing_from_xlsx_export(fixture_html):
+    xlsx = make_export_xlsx([
+        # post-migration ID style; slug uses the compact form (3308-dora221)
+        ["3308 - DORA221", "2025-03-28", "2025-04-01",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "3", "", "q", "", "a"],
+        # hyphenated slug variant (first candidate 404s, second resolves)
+        ["3476 - DORA-280", "2025-05-01", "2025-05-02",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "5", "", "q", "", "a"],
+        # foreign act — filtered out by require_act_ref, never fetched
+        ["3374", "2025-06-26", "2025-07-01",
+         "(EU) No 2015/35 - supplementing Dir 2009/138/EC (SII)",
+         "t", "15", "", "q", "", "a"],
+        # pre-migration entry whose page is gone — warned about, skipped
+        ["2787 - DORA 011", "2024-12-06", "2024-12-07",
+         "(EU) 2022/2554 - Digital Operational Resilience Act (DORA)",
+         "t", "30", "", "q", "", "a"],
+    ])
+    detail = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
+    http = FakeHttp({
+        eiopa.EXPORT_URL: xlsx,
+        f"{detail}/3308-dora221_en": fixture_html("eiopa_detail.html"),
+        f"{detail}/3476-dora-280_en": fixture_html("eiopa_detail.html"),
+    })
+    urls = list(eiopa.list_detail_urls(http, {"require_act_ref": "2022/2554"}))
+    assert urls == [f"{detail}/3308-dora221_en", f"{detail}/3476-dora-280_en"]
+    assert not any("3374" in u for u in http.calls)  # foreign act never fetched
+    # resolution cached the pages: fetch_record must not re-download
+    n_calls = len(http.calls)
+    rec = eiopa.fetch_record(http, urls[0])
+    assert rec.qa_id == "2787 - DORA 011"  # from the fixture's metadata
+    assert len(http.calls) == n_calls
+
+
+def test_eiopa_slug_candidates():
+    assert eiopa._slug_candidates("3308 - DORA221")[0] == "3308-dora221"
+    assert "3476-dora-280" in eiopa._slug_candidates("3476 - DORA-280")
+    assert eiopa._slug_candidates("Dora 262 - 3419")[0] == "3419-dora262"
+    assert eiopa._slug_candidates("3374") == ["3374"]
+
+
 def test_eiopa_fetch_record(fixture_html):
     url = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database/2787_en"
     rec = eiopa.fetch_record(FakeHttp({url: fixture_html("eiopa_detail.html")}), url)
@@ -59,15 +118,23 @@ def test_eiopa_fetch_record(fixture_html):
     assert rec.status == "Final"
     assert rec.dates == {"date_of_submission": "06 Dec 2024"}
     assert rec.question == "Does subcontracting of ICT services require notification?"
+    # "Background of the question" contains the word "question" — it must land
+    # in background, not overwrite or shadow the question section
+    assert rec.background == "Our provider subcontracts data storage."
     assert rec.answer == "It depends on the contractual arrangement.\n\n- Point one applies."
 
 
 def test_eiopa_joint_id_formats(fixture_html):
-    # the portal uses both "DORA 137 - 3195" and "2787 - DORA 011"
+    # ID styles seen across portal generations: "DORA 137 - 3195",
+    # "2787 - DORA 011", and post-migration "3308 - DORA221"
     url = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database/3195_en"
-    html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", "DORA 137 - 3195")
-    rec = eiopa.fetch_record(FakeHttp({url: html}), url)
-    assert rec.joint_id == "DORA137"
+    for portal_id, expected in [
+        ("DORA 137 - 3195", "DORA137"),
+        ("3308 - DORA221", "DORA221"),
+    ]:
+        html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", portal_id)
+        rec = eiopa.fetch_record(FakeHttp({url: html}), url)
+        assert rec.joint_id == expected, portal_id
     # a purely numeric ID must not yield a bogus joint id
     html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", "3195")
     rec = eiopa.fetch_record(FakeHttp({url: html}), url)
@@ -75,6 +142,39 @@ def test_eiopa_joint_id_formats(fixture_html):
 
 
 # --- ESMA ----------------------------------------------------------------------
+
+def esma_listing_base():
+    return (
+        f"{esma.BASE}/esma-qa-search-page/final?field_qa_serial_value="
+        "&combine_keywords_qa_search=&field_qa_level1_target_id%5B0%5D=20010"
+        "&created%5Bmin%5D=&created%5Bmax%5D="
+    )
+
+
+def test_esma_listing_follows_only_advertised_pager_links():
+    base = esma_listing_base()
+    detail = '/publications-data/questions-answers/{}'
+    # page 0 advertises page 1; page 1 advertises page 0 back. A page=2 URL
+    # exists on the portal but serves an unfiltered default listing — the
+    # adapter must never request pages the pager does not advertise.
+    page0 = (f'<a href="{detail.format(2646)}">x</a>'
+             '<a href="?field_qa_serial_value=&amp;page=1">2</a>')
+    page1 = (f'<a href="{detail.format(2103)}">y</a>'
+             '<a href="?field_qa_serial_value=&amp;page=0">1</a>')
+    http = FakeHttp({base: page0, f"{base}&page=1": page1})
+    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    assert urls == [esma.BASE + detail.format(2646), esma.BASE + detail.format(2103)]
+    assert http.calls == [base, f"{base}&page=1"]  # nothing beyond the pager
+    # every listing request must carry the cache-bypass cookie
+    assert all("Cookie" in h for h in http.headers_sent)
+
+
+def test_esma_listing_single_page():
+    base = esma_listing_base()
+    http = FakeHttp({base: '<a href="/publications-data/questions-answers/2356">x</a>'})
+    urls = list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    assert urls == [f"{esma.BASE}/publications-data/questions-answers/2356"]
+
 
 def test_esma_fetch_record(fixture_html):
     url = f"{esma.BASE}/publications-data/questions-answers/2356"

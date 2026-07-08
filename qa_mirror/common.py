@@ -72,6 +72,41 @@ def html_to_text(node) -> str:
     return "\n\n".join(parts)
 
 
+def iter_pager_listing(
+    http: Http, url_for, href_re: str, max_pages: int, tag: str, headers: dict | None = None
+):
+    """Yield detail links, following only pages the portal's own pager advertises.
+
+    For portals where a blind page++ loop is unsafe: requesting a page beyond
+    the last one has been observed to return an *unfiltered default listing*
+    instead of an empty page (importing unrelated records), and an explicit
+    page parameter on the first request can reset the view's filters.
+    url_for(page) must therefore return the page-0 URL without a page
+    parameter; further pages are discovered from pager hrefs in the HTML.
+    """
+    seen = set()
+    known_pages = {0}
+    done_pages: set[int] = set()
+    while True:
+        remaining = sorted(known_pages - done_pages)
+        if not remaining:
+            return
+        page = remaining[0]
+        if page >= max_pages:
+            print(
+                f"[{tag}] WARNING: pager advertises page {page} beyond "
+                f"max_pages={max_pages} — listing may be truncated",
+                file=sys.stderr,
+            )
+            return
+        html = http.get(url_for(page), headers=headers or {}).text
+        done_pages.add(page)
+        known_pages |= {int(n) for n in re.findall(r"[?&;]page=(\d+)", html)}
+        for link in sorted(set(re.findall(href_re, html)) - seen):
+            seen.add(link)
+            yield link
+
+
 def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
     """Yield detail-page links from a 0-based paginated listing, in page order.
 
