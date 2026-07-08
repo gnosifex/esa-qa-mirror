@@ -31,15 +31,16 @@ eba:
   require_status: "Final"
 
 eiopa:
-  # EIOPA search facets (f[N]=...). 489 = DORA regulation reference; Final answers only.
-  # CAUTION (2026-07-08): EIOPA migrated its Q&A search — these facet values are
-  # currently ignored by the portal and the old detail URLs return 404. The
-  # require_act_ref post-filter keeps foreign records out until new facet IDs
-  # are configured (filter manually in the browser and copy them from the URL).
+  # EIOPA search facets (f[N]=...). 489 = DORA regulation reference.
+  # NOTE (2026-07-08): EIOPA migrated its Q&A search. The old status%3AFinal
+  # facet no longer exists — sending it made the portal ignore ALL facets and
+  # serve an unfiltered listing (which once mass-delisted the corpus, see the
+  # plausibility brake). Status is now enforced via the require_status
+  # post-filter instead; old pre-migration detail URLs return 404.
   facets:
     - "regulation_reference%3A489"
-    - "status%3AFinal"
   default_act_ref: "2022/2554"
+  require_status: "Final"
   # Post-filter: only records whose parsed regulation reference matches are
   # mirrored — guards against listing filters silently breaking portal-side.
   require_act_ref: "2022/2554"

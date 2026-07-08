@@ -59,15 +59,23 @@ def test_eiopa_fetch_record(fixture_html):
     assert rec.status == "Final"
     assert rec.dates == {"date_of_submission": "06 Dec 2024"}
     assert rec.question == "Does subcontracting of ICT services require notification?"
+    # "Background of the question" contains the word "question" — it must land
+    # in background, not overwrite or shadow the question section
+    assert rec.background == "Our provider subcontracts data storage."
     assert rec.answer == "It depends on the contractual arrangement.\n\n- Point one applies."
 
 
 def test_eiopa_joint_id_formats(fixture_html):
-    # the portal uses both "DORA 137 - 3195" and "2787 - DORA 011"
+    # ID styles seen across portal generations: "DORA 137 - 3195",
+    # "2787 - DORA 011", and post-migration "3308 - DORA221"
     url = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database/3195_en"
-    html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", "DORA 137 - 3195")
-    rec = eiopa.fetch_record(FakeHttp({url: html}), url)
-    assert rec.joint_id == "DORA137"
+    for portal_id, expected in [
+        ("DORA 137 - 3195", "DORA137"),
+        ("3308 - DORA221", "DORA221"),
+    ]:
+        html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", portal_id)
+        rec = eiopa.fetch_record(FakeHttp({url: html}), url)
+        assert rec.joint_id == expected, portal_id
     # a purely numeric ID must not yield a bogus joint id
     html = fixture_html("eiopa_detail.html").replace("2787 - DORA 011", "3195")
     rec = eiopa.fetch_record(FakeHttp({url: html}), url)

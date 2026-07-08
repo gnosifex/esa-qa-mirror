@@ -50,12 +50,14 @@ def fetch_record(http: Http, url: str) -> Record:
         elif "date" in label:
             rec.dates[re.sub(r"[^a-z0-9]+", "_", label).strip("_")] = value
     # Question sits in an ecl-card headed "Question"; the answer under its own
-    # heading (e.g. "EIOPA answer") elsewhere in the article. Parse by headings:
-    # section = heading's following siblings up to the next heading, falling back
-    # to the heading's parent block (card case) when the siblings carry no text.
+    # heading (e.g. "EIOPA answer") elsewhere in the article; since the 2026
+    # portal migration there is also a "Background of the question" heading.
+    # Parse by headings: section = heading's following siblings up to the next
+    # heading, falling back to the heading's parent block (card case) when the
+    # siblings carry no text.
     for heading in article_node.find_all(re.compile("^h[1-6]$")):
         title = heading.get_text(" ", strip=True).lower()
-        if "question" not in title and "answer" not in title:
+        if not any(w in title for w in ("question", "answer", "background")):
             continue
         parts = []
         for sib in heading.next_siblings:
@@ -69,8 +71,14 @@ def fetch_record(http: Http, url: str) -> Record:
         if not body and heading.parent is not None:
             body = html_to_text(heading.parent)
             body = re.sub(rf"^{re.escape(heading.get_text(' ', strip=True))}\s*", "", body).strip()
-        body = re.sub(r"^(?:eiopa\s+answer|answer|question)\b[\s:]*", "", body, flags=re.I)
-        if "answer" in title and not rec.answer:
+        body = re.sub(
+            r"^(?:eiopa\s+answer|answer|background of the question|background|question)\b[\s:]*",
+            "", body, flags=re.I,
+        )
+        # "background" first: its heading contains the word "question" too
+        if "background" in title and not rec.background:
+            rec.background = body
+        elif "answer" in title and not rec.answer:
             rec.answer = body
         elif "question" in title and not rec.question:
             rec.question = body
