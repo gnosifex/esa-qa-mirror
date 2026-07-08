@@ -1,3 +1,5 @@
+import pytest
+
 from qa_mirror.common import (
     DELISTED_HASH_PREFIX,
     Record,
@@ -152,6 +154,56 @@ def test_mark_file_delisted(tmp_path):
     # already marked → no second marker, reported as not-newly-marked
     assert mark_file_delisted(tmp_path, state.key(rec), "2026-07-09") is None
     assert path.read_text(encoding="utf-8").count("x_delisted") == 1
+
+
+# --- Http retries -------------------------------------------------------------
+
+class _Resp:
+    def __init__(self, code):
+        self.status_code = code
+        self.headers = {}
+
+    def raise_for_status(self):
+        import requests
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code}", response=self)
+
+
+def make_http(responses, monkeypatch):
+    from qa_mirror import common as c
+    monkeypatch.setattr(c.time, "sleep", lambda s: None)
+    h = c.Http(delay=0, retries=2)
+    calls = []
+
+    class Sess:
+        def get(self, url, **kw):
+            calls.append(url)
+            return _Resp(responses[min(len(calls), len(responses)) - 1])
+
+    h.session = Sess()
+    return h, calls
+
+
+def test_http_retries_transient_errors(monkeypatch):
+    h, calls = make_http([503, 429, 200], monkeypatch)
+    assert h.get("u").status_code == 200
+    assert len(calls) == 3
+
+
+def test_http_gives_up_after_retries(monkeypatch):
+    import requests
+    h, calls = make_http([503, 503, 503], monkeypatch)
+    with pytest.raises(requests.HTTPError):
+        h.get("u")
+    assert len(calls) == 3  # retries=2 → 3 attempts, then the 503 raises
+
+
+def test_http_does_not_retry_hard_404(monkeypatch):
+    import requests
+    h, calls = make_http([404], monkeypatch)
+    with pytest.raises(requests.HTTPError):
+        h.get("u")
+    assert len(calls) == 1
 
 
 # --- iter_listing -----------------------------------------------------------

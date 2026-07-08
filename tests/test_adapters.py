@@ -207,16 +207,49 @@ def test_esma_listing_retries_unfiltered_cache_responses(monkeypatch):
     assert urls == [f"{esma.BASE}/publications-data/questions-answers/2646"]
 
 
-def test_esma_listing_fails_closed_on_persistent_unfiltered_responses(monkeypatch):
-    import pytest as _pytest
-
+def test_esma_falls_back_to_id_scan_when_listing_stays_unfiltered(
+    monkeypatch, fixture_html
+):
     from qa_mirror import common
     monkeypatch.setattr(common.time, "sleep", lambda s: None)
     base = esma_listing_base()
     junk = '<a href="/publications-data/questions-answers/2856">junk</a>'
-    http = FlakyHttp({base: [junk]})
-    with _pytest.raises(RuntimeError, match="unfiltered"):
-        list(esma.list_detail_urls(http, {"level1_ids": [20010]}))
+    detail = f"{esma.BASE}/publications-data/questions-answers"
+
+    class ScanHttp(FlakyHttp):
+        def __init__(self):
+            super().__init__({base: [junk]})
+            self.details = {
+                f"{detail}/2101": fixture_html("esma_detail.html"),
+                f"{detail}/2103": fixture_html("esma_detail.html"),
+            }
+
+        def get(self, url, **kw):
+            if url in self.details:
+                self.calls.append(url)
+                from types import SimpleNamespace
+                return SimpleNamespace(text=self.details[url])
+            if url.startswith(detail):
+                self.calls.append(url)
+                import requests
+                from types import SimpleNamespace
+                raise requests.HTTPError(
+                    "404", response=SimpleNamespace(status_code=404)
+                )
+            return super().get(url, **kw)
+
+    http = ScanHttp()
+    params = {"level1_ids": [20010], "id_scan_start": 2100, "id_scan_gap": 3}
+    urls = list(esma.list_detail_urls(http, params))
+    # junk listing never yielded anything; the scan found the two live pages
+    # and stopped after 3 consecutive missing IDs past the last hit
+    assert urls == [f"{detail}/2101", f"{detail}/2103"]
+    assert f"{detail}/2107" not in http.calls  # gap budget exhausted at 2106
+    # scan-fetched pages are cached: fetch_record must not re-download
+    n = len(http.calls)
+    rec = esma.fetch_record(http, urls[0])
+    assert rec.question
+    assert len(http.calls) == n
 
 
 def test_esma_fetch_record(fixture_html):
