@@ -28,6 +28,14 @@ from .common import Http, State, write_record
 ADAPTERS = {"eba": eba, "eiopa": eiopa, "esma": esma}
 
 
+def _act_ref(raw: str) -> str:
+    """The structured act reference (e.g. '2022/2554') inside a portal/register
+    act string, or '' if none — used to tell a real act disagreement from mere
+    wording differences ('DORA - Regulation (EU) 2022/2554' vs the reverse)."""
+    m = common._ACT_REF_RE.search(raw or "")
+    return (m.group(1) or m.group(2)) if m else ""
+
+
 def _write_step_summary(totals: dict):
     """Mirror the run summary into the GitHub Actions job summary, if present."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -95,7 +103,16 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 # act we discovered it for rather than in data/unsorted/.
                 rec.joint_id = row["joint_id"] or rec.joint_id
                 rec.status = row["status"] or rec.status
-                rec.legal_act_raw = row["legal_act_raw"] or rec.legal_act_raw
+                if row["legal_act_raw"]:
+                    portal_act = rec.legal_act_raw
+                    rec.legal_act_raw = row["legal_act_raw"]
+                    # When the portal names a *different* act than the register
+                    # (verified live for ESMA 2364 / DORA138: register DORA, ESMA
+                    # portal MiCA), keep the register's classification but record
+                    # the portal's so the disagreement stays visible, not hidden.
+                    # Mere wording differences (same ref) are not a disagreement.
+                    if portal_act and _act_ref(portal_act) != _act_ref(row["legal_act_raw"]):
+                        rec.extra["portal_legal_act"] = portal_act
                 rec.article = rec.article or row["article"]
                 rec.topic = rec.topic or row["topic"]
                 if row["answered_by"]:

@@ -104,8 +104,31 @@ def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
     monkeypatch.setattr(esma, "fetch_record", esma_fetch)
 
     assert run(root) == 0
-    assert (root / "data" / "dora" / "esma-2364.md").exists()
+    doc = root / "data" / "dora" / "esma-2364.md"
+    assert doc.exists()
     assert not (root / "data" / "unsorted" / "esma-2364.md").exists()
+    # the portal's differing act classification is kept visible, not hidden
+    text = doc.read_text()
+    assert 'legal_act: "DORA"' in text
+    assert 'x_portal_legal_act: "MiCA"' in text
+
+
+def test_matching_act_wording_is_not_flagged_as_disagreement(root, monkeypatch):
+    # portal and register describe the same act with different word order — must
+    # NOT be recorded as a disagreement
+    rows = [row("DORA003", "esma", "2356",
+                act="DORA - Regulation (EU) 2022/2554")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2356", source_url=url,
+                      legal_act_raw="Regulation (EU) 2022/2554 - DORA",
+                      question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
+
+    assert run(root) == 0
+    text = (root / "data" / "dora" / "esma-2356.md").read_text()
+    assert "x_portal_legal_act" not in text
 
 
 def test_authority_filter_restricts_rows(root, monkeypatch):
