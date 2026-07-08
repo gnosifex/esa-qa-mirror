@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 # Never two mirror runs at once (manual dispatch vs cron) — they would race
 # on the state.json/data commit.
@@ -34,12 +36,11 @@ jobs:
         id: mirror
         continue-on-error: true
         run: python -m qa_mirror
-      - run: python -m qa_mirror.site
       - name: Commit changes
         run: |
           git config user.name "esa-qa-mirror bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data state.json docs
+          git add data state.json
           git diff --cached --quiet && echo "no changes" && exit 0
           git commit -m "mirror: $(date -u +%F) delta"
           git pull --rebase origin "${GITHUB_REF_NAME}"
@@ -49,3 +50,15 @@ jobs:
         run: |
           echo "mirror run reported errors — see the Mirror step log and job summary"
           exit 1
+
+  # Rebuild + deploy the search site from the (possibly partial) fresh data.
+  # Runs even when the mirror job ended red — partial results are committed
+  # and the site should reflect them.
+  deploy:
+    needs: mirror
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml

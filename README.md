@@ -18,6 +18,8 @@ python -m qa_mirror --authority eba # one portal only
 python -m qa_mirror.site            # rebuild the docs/ search index from data/
 ```
 
+The search index (`docs/records-*.json`, `docs/manifest.json`) is a build artifact derived from `data/` — it is gitignored and generated at deploy time by the `pages` workflow, so the corpus lives in the repo exactly once.
+
 Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dora/eba-2024-7089.md`) — grouped by legal act, with the basis act and its level-2 acts in one directory. `state.json` tracks content hashes so repeated runs only rewrite new or changed records (delta behaviour by default; `--full` rewrites everything). The `retrieved_at` timestamp is excluded from the change detection.
 
 ## Configuration
@@ -55,6 +57,8 @@ Then run `python -m qa_mirror` once for the initial corpus.
 ## Scheduled runs
 
 `.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report. Any adapter error turns the run red (the successful part is still committed); the per-authority counts land in the job summary.
+
+Each mirror run then calls `pages.yml`, which builds the search index from `data/` and deploys the search page as a GitHub Pages artifact (`pages.yml` also runs on relevant pushes to main). **One-time setup:** set the Pages source to "GitHub Actions" (repo Settings → Pages → Build and deployment → Source).
 
 **Removed Q&As are never deleted, only marked:** when a complete, error-free listing pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears at the portal, the record is rewritten and the marker cleared automatically.
 
@@ -110,7 +114,9 @@ config.yaml             which Q&A sets to mirror
 data/<act-family>/      the mirrored records, authority in the filename (committed)
 state.json              delta-run state (committed)
 tests/                  pytest suite (fixture HTML per portal + unit tests)
-.github/workflows/      weekly mirror run (mirror.yml) + tests/lint (ci.yml)
+docs/                   search page (index.html committed; JSON index generated at deploy)
+.github/workflows/      weekly mirror run (mirror.yml), search-site deploy (pages.yml),
+                        tests/lint (ci.yml)
 ```
 
 ## Joint Q&As, source of truth, deduplication
