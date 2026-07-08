@@ -1,118 +1,22 @@
-"""ESMA Q&A adapter.
+"""ESMA Q&A detail-page parser.
 
-Listing:  https://www.esma.europa.eu/esma-qa-search-page/final?...&field_qa_level1_target_id[0]=<id>&...&page=N
 Detail:   https://www.esma.europa.eu/publications-data/questions-answers/<id>
-Detail markup: field divs (field--name-field-qa-*), Status inside div.additionalinfo,
-question/answer inside <details> accordion blocks.
+Detail markup: field divs (field--name-field-qa-*), Status inside
+div.additionalinfo, question/answer inside <details> accordion blocks.
 
-Listing quirks (verified live 2026-07-08 after ESMA's portal migration):
-- The search sits behind a cache that ignores the query string for cookie-less
-  requests and then serves an unfiltered default page — non-deterministically.
-  Sending any cookie makes the cache pass the request through to Drupal, which
-  honors facets and pagination. Hence the static cache-bypass cookie below.
-- The exposed-form parameter set must be sent in full (empty fields included)
-  and the facet in indexed style, exactly like the portal's own pager links.
-- Requesting a page beyond the last one returns the unfiltered default listing
-  instead of an empty page — so only pages advertised by the pager are fetched
-  (a blind page++ loop would import unrelated recent Q&As).
+Discovery of ESMA-received Joint Q&As is the Joint Q&A Register's job (see
+qa_mirror/register.py) — this module only turns a known detail URL into a
+Record. ESMA's own facet search was retired: it sat behind a cache that
+non-deterministically served unfiltered results, which repeatedly corrupted
+the corpus. The detail pages themselves have been reliable throughout.
 """
 from __future__ import annotations
 
 import re
-import sys
 
-import requests
-
-from .common import Http, Record, html_to_text, iter_pager_listing, soup
+from .common import Http, Record, html_to_text, soup
 
 BASE = "https://www.esma.europa.eu"
-_CACHE_BYPASS = {"Cookie": "esa_qa_mirror=1"}
-
-# detail pages fetched during the ID scan, keyed by URL — fetch_record
-# consumes them so each page is downloaded once
-_page_cache: dict[str, str] = {}
-
-
-def list_detail_urls(http: Http, params: dict, max_pages: int = 100):
-    """Detail URLs via the facet listing, falling back to a sequential ID scan.
-
-    The search endpoint intermittently serves unfiltered responses in windows
-    that can outlast even minutes of retrying (see iter_pager_listing). Detail
-    pages themselves are reliable and — since the portal migration — carry the
-    level-1 act, so a deterministic fallback exists: walk the sequential
-    numeric ID space and let the act/status post-filters sort the records.
-    Slower (one request per ID, most of them foreign acts skipped downstream),
-    but never wrong and never red.
-    """
-    yielded: set[str] = set()
-    try:
-        for url in _listing_urls(http, params, max_pages):
-            yielded.add(url)
-            yield url
-        return
-    except RuntimeError as exc:
-        print(f"[esma] {exc}; falling back to sequential ID scan", file=sys.stderr)
-    yield from _id_scan(http, params, yielded)
-
-
-def _listing_urls(http: Http, params: dict, max_pages: int):
-    facets = "&".join(
-        f"field_qa_level1_target_id%5B{i}%5D={a}"
-        for i, a in enumerate(params.get("level1_ids", []))
-    )
-    base = (
-        f"{BASE}/esma-qa-search-page/final?field_qa_serial_value="
-        f"&combine_keywords_qa_search=&{facets}&created%5Bmin%5D=&created%5Bmax%5D="
-    )
-    for link in iter_pager_listing(
-        http,
-        lambda page: base if page == 0 else f"{base}&page={page}",
-        r'href="(/publications-data/questions-answers/\d+)"',
-        max_pages,
-        "esma",
-        headers=_CACHE_BYPASS,
-        # A correctly filtered page echoes the facet in its pager/tab links;
-        # the unfiltered default page (served randomly by some cache nodes,
-        # cookie or not) does not — importing from it would pollute the corpus
-        # with unrelated recent Q&As, as happened twice before this guard.
-        validate=lambda html: facets in html,
-    ):
-        yield BASE + link
-
-
-def _id_scan(http: Http, params: dict, yielded: set):
-    i = int(params.get("id_scan_start", 2100))
-    # Large default: ESMA's ID space has dead zones of >50 consecutive missing
-    # IDs, so a small gap ends the scan before the higher DORA records.
-    max_gap = int(params.get("id_scan_gap", 300))
-    gap = 0
-    transient = 0
-    while gap < max_gap:
-        url = f"{BASE}/publications-data/questions-answers/{i}"
-        i += 1
-        try:
-            html = http.get(url).text
-        except requests.HTTPError as exc:
-            # Only a hard 404 is a real hole in the ID space and counts toward
-            # the stop gap. A transient error leaves that ID unknown: skip it
-            # without advancing the gap (so the scan still reaches the end),
-            # and go red at the end rather than abort mid-scan.
-            if exc.response is not None and exc.response.status_code == 404:
-                gap += 1
-                continue
-            transient += 1
-            print(f"[esma] WARNING: transient failure on id {i - 1} ({exc}), skipping",
-                  file=sys.stderr)
-            continue
-        gap = 0
-        _page_cache[url] = html
-        if url not in yielded:
-            yield url
-    if transient:
-        raise RuntimeError(
-            f"{transient} detail page(s) temporarily unreachable during ID scan "
-            "— listing incomplete this run (records already reached were written)"
-        )
 
 
 def _field(doc, name: str) -> str:
@@ -124,10 +28,7 @@ def _field(doc, name: str) -> str:
 
 
 def fetch_record(http: Http, url: str) -> Record:
-    html = _page_cache.pop(url, None)
-    if html is None:
-        html = http.get(url).text
-    doc = soup(html)
+    doc = soup(http.get(url).text)
     rec = Record(authority="esma", qa_id=url.rsplit("/", 1)[-1], source_url=url)
     rec.topic = _field(doc, "field-qa-subject-matter")
     # Since the 2026 migration the level-1 act is exposed as field-qa-level1

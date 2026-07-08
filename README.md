@@ -2,19 +2,22 @@
 
 **🔍 Search the corpus in your browser — no account needed: <https://gnosifex.github.io/esa-qa-mirror/>**
 
-Mirrors the **final Q&As of the three European Supervisory Authorities** (EBA Single Rulebook Q&A, EIOPA Q&A, ESMA Q&A) into one normalized, greppable Markdown repository — one file per Q&A with uniform YAML frontmatter (authority, legal act, article, topic, status, dates, source URL).
+Mirrors the supervisory **Q&As relevant to banking regulation** into one normalized, greppable Markdown repository — one file per Q&A with uniform YAML frontmatter (authority, legal act, article, topic, status, dates, source URL).
 
-**Why:** The three portals use different frontends, different formats and poor search. Supervisory interpretations that materially affect how an article must be read are effectively undiscoverable by web search. This tool turns the open, growing Q&A corpus into an enumerable local corpus you can search, diff and cite — and keeps it current via scheduled delta runs.
+Two bodies of Q&As matter for a credit institution, and this tool covers both:
 
-Out of the box it mirrors the **DORA** Q&As of all three authorities and the **CRD** Q&As of the EBA (banking-sector acts have no Joint Q&As — they live solely in the EBA Single Rulebook tool); any other legal act is a config-only change (see "Adding a new legal act"). Only **final** Q&As are mirrored — EIOPA/ESMA filter at listing level, EBA via the `require_status` post-filter.
+- **Joint ESAs Q&As** — cross-sectoral acts answered jointly by EBA/EIOPA/ESMA. **DORA** is the one that binds banks today. These are discovered through the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas), then fetched from whichever authority's webtool received the question.
+- **EBA Single Rulebook Q&As** — the banking-sector acts that live solely at the EBA: **CRD** out of the box, with **CRR / PSD2 / BRRD / MiCAR** a one-line config change.
+
+**Why:** the portals use different frontends, different formats and poor search, and the joint corpus is scattered across three authorities. Supervisory interpretations that materially affect how an article must be read are effectively undiscoverable by web search. This tool turns that open, growing corpus into an enumerable local corpus you can search, diff and cite — and keeps it current via scheduled delta runs. Only **final** Q&As are mirrored.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
 python -m qa_mirror                 # full delta run per config.yaml
-python -m qa_mirror --limit 5       # smoke test: max 5 records per authority
-python -m qa_mirror --authority eba # one portal only
+python -m qa_mirror --limit 5       # smoke test: max 5 records per source
+python -m qa_mirror --authority eba # one receiving authority only
 python -m qa_mirror.site            # rebuild the docs/ search index from data/
 ```
 
@@ -22,13 +25,33 @@ The search index (`docs/records-*.json`, `docs/manifest.json`) is a build artifa
 
 Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dora/eba-2024-7089.md`) — grouped by legal act, with the basis act and its level-2 acts in one directory. `state.json` tracks content hashes so repeated runs only rewrite new or changed records (delta behaviour by default; `--full` rewrites everything). The `retrieved_at` timestamp is excluded from the change detection.
 
+## How discovery works
+
+Two sources, one per kind of act (see `config.yaml`):
+
+- **Joint acts (DORA) → the Joint Q&A Register.** One query to the register's PowerBI backend returns *every* joint Q&A with its receiving authority, the authority's native detail-page id, a direct link to the answer, status, legal act and metadata. The mirror takes the rows for the wanted act and status, then fetches each linked detail page for its content. This is what makes the joint corpus *complete*: the register lists Q&As regardless of who drafted the answer (including EU-Commission-answered finals), which a per-portal search misses.
+- **Sectoral banking acts (CRD…) → the EBA's own search.** These are not Joint Q&As and have no register entry, so the EBA Single Rulebook search is paged through directly, filtered to finals.
+
+Each discovered detail page is parsed by the receiving authority's adapter (`qa_mirror/eba.py`, `eiopa.py`, `esma.py`) into a uniform `Record`. The register supplies the authoritative shared fields (joint id, status, legal act, dates); the detail page supplies question, background and answer.
+
 ## Configuration
 
-`config.yaml` holds the portal facet filters. The IDs are the portals' own facet values — filter manually in the browser and copy the values from the resulting URL:
+`config.yaml` declares the two discovery sources:
 
-- **EBA** `legal_act_ids`: values of `qa_legal_act[]` (e.g. `20` = DORA Regulation, `19` = DORA delegated/implementing acts).
-- **EIOPA** `facets`: the `f[N]=` values (e.g. `regulation_reference%3A489` = DORA, `status%3AFinal`).
-- **ESMA** `level1_ids`: values of `field_qa_level1_target_id` (e.g. `20010` = DORA).
+```yaml
+joint_acts:
+  DORA:
+    register_act: "DORA"      # matches the register's "Legal act" by substring
+    act_ref: "2022/2554"      # fills legal_act_ref where a portal exposes none
+    statuses: ["Final"]       # register Status values to mirror
+
+eba:
+  legal_act_ids: [32]         # 32 = CRD; qa_legal_act[] facet values
+  default_act_ref: "2013/36"
+  require_status: "Final"     # EBA search has no status facet — post-filter
+```
+
+The EBA `legal_act_ids` are the portal's own `qa_legal_act[]` facet values — filter manually in the browser and copy the value from the resulting URL. Common banking acts: `32` = CRD · `33` = CRR · `38` = PSD2 · `31` = BRRD · `18` = MiCAR. **Caution:** CRR alone is a very large, multi-year corpus — expect a long first run.
 
 ## Using this mirror for research
 
@@ -44,25 +67,22 @@ Locally it gets better: clone and `grep -rl 'subcontracting' data/dora/`, or ope
 
 Always verify against the linked source before relying on a record (see the per-record disclaimer).
 
-## Adding a new legal act
+## Adding a legal act
 
-Three steps, config only:
-
-1. **Find the facet IDs:** filter for the act manually in each portal's browser search and copy the ID from the resulting URL (EBA `qa_legal_act[]`, EIOPA `f[N]=regulation_reference:…`, ESMA `field_qa_level1_target_id`). Sectoral acts exist in one portal only — banking acts (CRD/CRR/PSD2…) solely at the EBA; only cross-sectoral acts (DORA, SFDR, PRIIPs, Securitisation…) are Joint ESAs Q&As across portals.
-2. **Add the IDs** to the authority sections in `config.yaml` (plus `default_act_ref` where a portal exposes no legal-act string).
-3. **Declare the act** under `acts:` in `config.yaml` (canonical `label` → target directory; for Joint acts also the register's `joint_id_format`). Without a label, records land in `data/unsorted/`.
+- **Another joint act** (SFDR, PRIIPs, Securitisation… — any cross-sectoral act in the register): add an entry under `joint_acts` with its `register_act` substring and `act_ref`. If you want a canonical directory label and joint-id normalization, also declare it under `acts:` (canonical `label` → target directory; for joint acts the register's `joint_id_format`). Without a label, records land in `data/unsorted/`.
+- **Another sectoral banking act** (CRR, PSD2…): add its `qa_legal_act[]` id to `eba.legal_act_ids`, and declare the act under `acts:` for its directory label.
 
 Then run `python -m qa_mirror` once for the initial corpus.
 
 ## Scheduled runs
 
-`.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report. Any adapter error turns the run red (the successful part is still committed); the per-authority counts land in the job summary.
+`.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report. Any adapter error — or a failed register query — turns the run red (the successful part is still committed); the per-source counts land in the job summary.
 
 Each mirror run then calls `pages.yml`, which builds the search index from `data/` and deploys the search page as a GitHub Pages artifact (`pages.yml` also runs on relevant pushes to main). **One-time setup:** set the Pages source to "GitHub Actions" (repo Settings → Pages → Build and deployment → Source).
 
-**Removed Q&As are never deleted, only marked:** when a complete, error-free listing pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears at the portal, the record is rewritten and the marker cleared automatically.
+**Removed Q&As are never deleted, only marked:** when a complete, error-free discovery pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears, the record is rewritten and the marker cleared automatically.
 
-**Plausibility brake:** if more than `max(5, 20%)` of an authority's known records vanish from the listing at once, that is almost certainly a broken listing filter (portals have been observed to silently ignore facet parameters after migrations), not mass withdrawal — the run refuses to mark anything for that authority and exits red instead. `--allow-mass-delisting` overrides after manual verification. The `probe` workflow (manual dispatch) shows what the portal actually serves the runner when diagnosing such failures.
+**Plausibility brake:** if more than `max(5, 20%)` of a source's known records vanish at once, that is almost certainly a broken query (the register or a portal silently ignoring a filter), not mass withdrawal — the run refuses to mark anything for that authority and exits red instead. `--allow-mass-delisting` overrides after manual verification. The `probe` workflow (manual dispatch) shows what the sources actually serve the runner when diagnosing such failures.
 
 ## Record format
 
@@ -70,7 +90,7 @@ Each mirror run then calls `pages.yml`, which builds the search index from `data
 ---
 authority: eba
 qa_id: "2024_7089"
-joint_id: ""                          # shared Joint-ESAs id where the portal exposes it
+joint_id: ""                          # shared Joint-ESAs id (from the register / portal)
 legal_act: "DORA"                     # canonical label (ACT_LABELS in common.py)
 legal_act_ref: "(EU) 2022/2554"       # structured regulation reference
 legal_act_raw: "Regulation (EU) No 2022/2554 (DORA Reg)"   # portal's verbatim string
@@ -82,7 +102,7 @@ date_submission_date_iso: "2024-05-20"        # normalized twin, for sorting/fil
 date_final_publishing_date: "08/08/2025"
 date_final_publishing_date_iso: "2025-08-08"
 x_…: portal-specific extras, kept verbatim
-x_delisted: "2026-07-08"              # only if the Q&A vanished from the portal listing
+x_delisted: "2026-07-08"              # only if the Q&A vanished from discovery
 source_url: "https://…"
 retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 ---
@@ -99,32 +119,33 @@ retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 > for accuracy/completeness; verify against the original before any use.
 ```
 
-The first block of frontmatter keys (`authority` … `status`, `source_url`) is **uniform across all three authorities**; `legal_act`/`legal_act_ref` are normalized (portal strings differ wildly; ESMA exposes none — the configured `default_act_ref` fills it). Portal-specific fields are preserved verbatim under the `x_` prefix. **Privacy by default:** submitter identity fields published by the EBA portal (name of institution/submitter, country) are deliberately not mirrored.
+The first block of frontmatter keys (`authority` … `status`, `source_url`) is **uniform across every record**; `legal_act`/`legal_act_ref` are normalized (portal strings differ wildly; ESMA exposes none — the configured `act_ref`/`default_act_ref` fills it). Portal-specific fields are preserved verbatim under the `x_` prefix. **Privacy by default:** submitter identity fields published by the EBA portal (name of institution/submitter, country) are deliberately not mirrored.
 
 ## Caveats
 
 - **Unofficial mirror.** The portal version always prevails; every record links its source. Q&A answers are generally not legally binding (for Level-1/2 questions answered by the European Commission they carry particular weight) — assess bindingness per record.
-- **Scrapers break.** The adapters parse the current portal HTML (verified 2026-07-08). Frontend changes will break individual adapters; each adapter fails independently without stopping the others, and the CLI exit code/summary shows errors. Fixes are local to one small adapter file.
+- **Scrapers break.** The adapters parse the current portal HTML, and the register client reverse-engineers PowerBI's undocumented backend (both verified 2026-07-08). Frontend/backend changes will break the affected piece; each detail fetch fails independently without stopping the others, a failed register query fails closed (no delisting), and the CLI exit code/summary shows errors. Fixes are local to one small module.
 - **Be polite.** Requests are rate-limited (`delay_seconds`, default 1.5 s) and the User-Agent identifies the tool. Keep it that way.
 - Content of the mirrored Q&As © the respective authorities (EBA/EIOPA/ESMA); reuse subject to their legal notices — [EBA legal notice](https://www.eba.europa.eu/legal-notice) · [EIOPA legal notice](https://www.eiopa.europa.eu/legal-notice_en) · [ESMA legal notice](https://www.esma.europa.eu/legal-notice). Every mirrored record carries its own disclaimer and source link. This repository's code is MIT-licensed.
 
 ## Layout
 
 ```
-qa_mirror/              the tool (common.py + one adapter per authority + CLI)
+qa_mirror/              the tool: common.py, register.py (joint discovery),
+                        one adapter per authority (eba/eiopa/esma), CLI
 config.yaml             which Q&A sets to mirror
 data/<act-family>/      the mirrored records, authority in the filename (committed)
 state.json              delta-run state (committed)
 tests/                  pytest suite (fixture HTML per portal + unit tests)
 docs/                   search page (index.html committed; JSON index generated at deploy)
 .github/workflows/      weekly mirror run (mirror.yml), search-site deploy (pages.yml),
-                        tests/lint (ci.yml)
+                        tests/lint (ci.yml), network probe (probe.yml)
 ```
 
-## Joint Q&As, source of truth, deduplication
+## Joint Q&As, the register, and deduplication
 
 DORA Q&As are **Joint ESAs Q&As**: one shared corpus, answered jointly, hosted in the webtool of whichever authority received the question, indexed centrally in the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas) (a PowerBI embed).
 
-**The authority webtools are the source of truth, not the joint register.** This is a deliberate design decision, grounded in practice: the register is a secondary index that has been observed to carry broken/wrong links to EBA/EIOPA entries, while an explicit search in the authority's own portal returned the correct record. This tool therefore mirrors the webtools directly; the register is useful only as a manual completeness cross-check (deliberately not scraped — PowerBI backends are brittle to automate anyway).
+**The register is the discovery index; the authority webtools are the source of truth for content.** The mirror reads the register to learn *which* joint Q&As exist and where each one lives, then fetches the answer from the receiving authority's own detail page. This split is deliberate: the register gives completeness (it lists every joint Q&A, including EU-Commission-answered finals a per-portal search would miss) while the webtool gives the authoritative, full-text answer. A register row whose link doesn't resolve to a fetchable detail page is skipped rather than trusted blindly.
 
-Cross-portal duplicates **do occur** (e.g. joint Q&A DORA003 is published both as EIOPA "2734 - DORA003" and ESMA 2356). The mirror deliberately keeps every authority's own copy — each webtool is the source of truth for its records — and exposes the shared `joint_id` in the frontmatter (where a portal encodes it, currently EIOPA), normalized to the Joint Q&A Register's native format (e.g. `DORA003`), as the key for deduplication and register cross-checks.
+Cross-portal duplicates **do occur** (e.g. joint Q&A DORA003 is published both as EIOPA "2734 - DORA003" and ESMA 2356). The mirror keeps every authority's own copy — each webtool is the source of truth for its records — and exposes the shared `joint_id` in the frontmatter (from the register, normalized to its native format, e.g. `DORA003`) as the key for deduplication and cross-checks.

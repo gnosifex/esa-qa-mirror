@@ -65,7 +65,7 @@ jobs:
             python3 - <<'PY'
           import re
           html = open("d.html").read()
-          for name in ("field-lqa-ist-of-topics", "field-qa-level", "field-qa-subject-matter"):
+          for name in ("field-qa-list-of-topics", "field-qa-level", "field-qa-subject-matter"):
               m = re.search(rf'field--name-{name}.*?</div>\s*</div>', html, re.S)
               chunk = re.sub(r"<[^>]+>", " ", m.group(0))[:400] if m else "(not found)"
               print(f"--- {name}:", re.sub(r"\s+", " ", chunk).strip()[:300])
