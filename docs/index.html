@@ -92,9 +92,9 @@ function render(R){
     +(hits.length>200?' — showing the first 200, refine your search':'');
   $('results').innerHTML=hits.slice(0,200).map(r=>`
     <div class="card">
-      <div class="meta"><b>${esc(r.authority.toUpperCase())} ${esc(r.qa_id)}</b>
-        ${r.joint_id?' · '+esc(r.joint_id):''} · ${esc(r.legal_act)}${r.article?' Art. '+esc(r.article):''}
-        ${r.topic?' · '+esc(r.topic):''} · ${esc(r.status)}
+      <div class="meta"><b>${esc(r.authority.toUpperCase())} ${hl(r.qa_id,terms)}</b>
+        ${r.joint_id?' · '+hl(r.joint_id,terms):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,terms):''}
+        ${r.topic?' · '+hl(r.topic,terms):''} · ${esc(r.status)}
         ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
       <div class="label">Question</div>
       <div class="a clampable">${hl(r.question,terms)}</div>

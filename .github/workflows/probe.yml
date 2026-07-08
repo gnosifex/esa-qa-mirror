@@ -1,0 +1,45 @@
+name: probe
+
+# Manual diagnostic: fetch the portal listing/detail pages exactly as the
+# mirror would and print what the Actions runner actually receives (status,
+# size, title, detail-link counts). Use when a mirror run delists or imports
+# implausibly — distinguishes portal changes from runner-specific responses
+# (bot detection, geo walls).
+
+on:
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      UA: "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; public Q&A archival tool; contact via repo issues)"
+    steps:
+      - name: EIOPA listing (DORA + Final facets)
+        run: |
+          url="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489&f%5B1%5D=status%3AFinal&page=0"
+          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
+          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
+          echo "detail links:"
+          grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -40 || echo "NONE"
+          echo "facet echo in page:"
+          grep -c 'regulation_reference' page.html || true
+      - name: EIOPA detail of a record delisted by the 09:30 run
+        run: |
+          curl -sS -A "$UA" "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/2787_en" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
+          grep -o 'Question ID[^<]*<b>[^<]*' d.html | head -2 || echo "no Question ID markup"
+      - name: ESMA listing (DORA facet)
+        run: |
+          url="https://www.esma.europa.eu/esma-qa-search-page/final?field_qa_level1_target_id%5B0%5D=20010&page=0"
+          curl -sS -A "$UA" "$url" -o page.html -w "HTTP %{http_code}, %{size_download} bytes, final URL: %{url_effective}\n" || true
+          grep -o '<title>[^<]*</title>' page.html || echo "(no title)"
+          echo "detail links:"
+          grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -40 || echo "NONE"
+      - name: ESMA detail of a record delisted by the 09:30 run
+        run: |
+          curl -sS -A "$UA" "https://www.esma.europa.eu/publications-data/questions-answers/2103" -o d.html -w "HTTP %{http_code}, %{size_download} bytes\n" || true
+          grep -o '<title>[^<]*</title>' d.html || echo "(no title)"
