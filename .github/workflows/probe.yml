@@ -25,6 +25,29 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Register row inspection — DORA138 / native-id vs link mismatch
+        run: |
+          python3 - <<'PY'
+          from qa_mirror import register
+          rows = register.fetch_rows()
+          # every row whose link id disagrees with the register's native id —
+          # a mismatch means the "Link to the answer" points at the wrong doc
+          mism = [r for r in rows
+                  if r["native_id"] and r["link"].rstrip("/").rsplit("/", 1)[-1]
+                  != r["native_id"] and r["native_id"] not in r["link"]]
+          print(f"=== link/native-id mismatches: {len(mism)} of {len(rows)} rows")
+          for r in mism:
+              print(f"  {r['joint_id']} {r['authority']} native={r['native_id']!r} "
+                    f"act={r['legal_act_raw']!r} link={r['link']}")
+          print("=== DORA13x rows in full")
+          for r in rows:
+              if r["joint_id"].startswith("DORA13"):
+                  print(" ", r)
+          print("=== any row linking to esma 2364")
+          for r in rows:
+              if "2364" in r["link"] or r["native_id"] == "2364":
+                  print(" ", r)
+          PY
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
