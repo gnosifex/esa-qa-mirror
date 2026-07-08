@@ -43,6 +43,17 @@ jobs:
           grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | sort -u | head -15 || echo "NONE"
           echo "known out-of-scope IDs present (3568=RFR, 3077=SII → facet ignored):"
           grep -c 'database/3568_en\|database/3077_en' page.html || true
+      - name: EIOPA pagination behaviour (pager hrefs, page=1 with/without cookie)
+        run: |
+          base="https://www.eiopa.europa.eu/search-qas_en?f%5B0%5D=regulation_reference%3A489"
+          echo "--- base page (no page param): pager hrefs"
+          curl -sS -A "$UA" "$base" -o b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -oE '[?&;]page=[0-9]+' b.html | sort | uniq -c | head -12
+          for c in "" "-H Cookie:esa_qa_mirror=1"; do
+            echo "--- page=1 cookie='$c'"
+            curl -sS $c -A "$UA" "$base&page=1" -o p.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+            grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' p.html | sort -u | head -12 || echo "NONE"
+          done
       - name: EIOPA detail markup of a listed record
         run: |
           link=$(grep -o 'href="/qa-regulation/questions-and-answers-database/[^"]*"' page.html | head -1 | sed 's/href="//;s/"//')
