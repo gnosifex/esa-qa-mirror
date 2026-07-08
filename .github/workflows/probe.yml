@@ -25,19 +25,6 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: EBA list_detail_urls — real code path, full facet-32 walk
-        run: |
-          python3 - <<'PY'
-          from qa_mirror import eba
-          from qa_mirror.common import Http
-          http = Http(delay=0.6)
-          urls = list(eba.list_detail_urls(http, {"legal_act_ids": [32]}))
-          ids = [u.rsplit("/", 1)[-1] for u in urls]
-          print("total:", len(ids))
-          print("first:", ids[:5])
-          print("last:", ids[-5:])
-          print("unique:", len(set(ids)))
-          PY
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
@@ -77,14 +64,6 @@ jobs:
               if cs.status_code == 200:
                   break
           PY
-      - name: EBA Single Rulebook search — facet 32 (CRD) per-page link counts
-        run: |
-          for p in 0 1 2 3 4 5 6 7 8 9; do
-            url="https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32&page=$p"
-            curl -sS -A "$UA" "$url" -o e.html -w "page $p: HTTP %{http_code}, %{size_download} bytes"
-            n=$(grep -oE 'single-rule-book-qa/qna/view/publicId/[0-9_]+' e.html | sort -u | wc -l)
-            echo ", $n detail links"
-          done
       - name: EIOPA XLSX export (the listing source)
         run: |
           curl -sSL -A "$UA" "https://www.eiopa.europa.eu/sites/default/files/export_qa/eiopa-qa.xlsx" -o qa.xlsx -w "HTTP %{http_code}, %{size_download} bytes, type: %{content_type}\n"
