@@ -17,6 +17,7 @@
   input[type=search] { flex:1 1 260px; padding:.55rem .8rem; font-size:1rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
   select { padding:.55rem .5rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
   .count { color:var(--muted); font-size:.86rem; margin:.3rem 0 .8rem; }
+  .hint { color:var(--muted); font-size:.76rem; margin:-.4rem 0 .8rem; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
   .meta { font-size:.8rem; color:var(--muted); margin-bottom:.35rem; }
   .meta b { color:var(--fg); }
@@ -39,10 +40,11 @@
 conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
 the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
-  <input id="q" type="search" placeholder="Search questions & answers… (e.g. subcontracting, register of information, Art. 28)" autofocus>
+  <input id="q" type="search" placeholder='Search questions &amp; answers… e.g. "register of information" OR subcontracting' autofocus>
   <select id="act"><option value="">All acts</option></select>
   <select id="auth"><option value="">All authorities</option></select>
 </div>
+<div class="hint">words match at word start (<i>art. 28</i> finds Article&nbsp;28) · <i>"…"</i> exact phrase · <i>OR</i>&thinsp;/&thinsp;<i>AND</i> · <i>/…/</i> regex · newest first</div>
 <div class="count" id="count">Loading…</div>
 <div id="results"></div>
 <div class="disclaimer"><b>Disclaimer.</b> Unofficial, automatically generated mirror — no liability for accuracy,
@@ -57,8 +59,46 @@ const $=id=>document.getElementById(id);
 function toggleCard(btn){const card=btn.closest('.card');card.classList.toggle('open');
   btn.textContent=card.classList.contains('open')?'collapse ▴':'show full Q&A ▾';}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function hl(s,terms){let e=esc(s);for(const t of terms){if(t.length<2)continue;
-  e=e.replace(new RegExp('('+t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>');}return e;}
+
+// ---- SEARCH CORE (pure functions; unit-tested via tests/test_search_js.py) ----
+// Query language: bare words AND-combine and match at word start ("art" finds
+// "Article", not "part"); "…" is an exact phrase; OR/AND (any case) combine;
+// /…/ is a regex (invalid patterns fall back to a literal match). Stopwords
+// and one-letter words are ignored outside phrases — they occur in every
+// record, so they neither filter nor deserve highlighting.
+const STOP=new Set(['an','and','are','as','at','be','by','for','in','is','it','of','on','or','the','to','with']);
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+function parseQuery(q){ // → OR-groups of matchers [{kind:'word'|'phrase'|'re',v}]
+  const toks=String(q).match(/"[^"]*"|\/[^/]*\/|\S+/g)||[],groups=[[]];
+  const cur=()=>groups[groups.length-1];
+  for(const t of toks){
+    if(/^or$/i.test(t)){if(cur().length)groups.push([]);continue;}
+    if(/^and$/i.test(t))continue;
+    if(t[0]==='"'){const v=t.replace(/^"|"$/g,'').trim().toLowerCase().replace(/\s+/g,' ');
+      if(v)cur().push({kind:'phrase',v});continue;}
+    if(t.length>2&&t[0]==='/'&&t.endsWith('/')){cur().push({kind:'re',v:t.slice(1,-1)});continue;}
+    const v=t.toLowerCase().replace(/^[/("'\[]+|[)"'\],.;:!?]+$/g,'');
+    if(v.length>=2&&!STOP.has(v))cur().push({kind:'word',v});
+  }
+  return groups.filter(g=>g.length);
+}
+function matcherRe(m,flags){
+  if(m.kind==='re'){try{return new RegExp(m.v,flags);}catch(e){return new RegExp(reEsc(m.v),flags);}}
+  if(m.kind==='phrase')return new RegExp(reEsc(m.v).replace(/ /g,'\\s+'),flags);
+  return new RegExp((/^\w/.test(m.v)?'\\b':'')+reEsc(m.v),flags);
+}
+function matches(hay,groups){ // hay: lowercased, whitespace-normalized
+  return !groups.length||groups.some(g=>g.every(m=>matcherRe(m,'i').test(hay)));
+}
+function highlightRe(groups){ // one combined regex → single-pass marking
+  const ps=groups.flat().map(m=>matcherRe(m,'i').source);
+  return ps.length?new RegExp('('+ps.join('|')+')','gi'):null;
+}
+// ---- END SEARCH CORE ----
+
+const hayOf=r=>r._hay??(r._hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '
+  +r.question+' '+(r.background||'')+' '+r.answer).toLowerCase().replace(/\s+/g,' '));
+function hl(s,hre){const e=esc(s);return hre?e.replace(hre,'<mark>$&</mark>'):e;}
 const familyOf=act=>act.split('-')[0].toLowerCase().replace(/[^a-z0-9]+/g,'-');
 function neededFamilies(){const act=$('act').value;
   if(act&&MANIFEST[familyOf(act)])return[familyOf(act)];
@@ -79,28 +119,28 @@ async function update(){
   render(R);
 }
 function render(R){
-  const terms=$('q').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const groups=parseQuery($('q').value);
   const act=$('act').value, auth=$('auth').value;
   const hits=R.filter(r=>{
     if(act&&r.legal_act!==act)return false;
     if(auth&&r.authority!==auth)return false;
-    if(!terms.length)return true;
-    const hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '+r.question+' '+(r.background||'')+' '+r.answer).toLowerCase();
-    return terms.every(t=>hay.includes(t));
-  });
+    return matches(hayOf(r),groups);
+  }).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))
+    ||String(b.qa_id).localeCompare(String(a.qa_id))); // newest first, dateless last
+  const hre=highlightRe(groups);
   $('count').textContent=hits.length+' of '+R.length+' Q&As'
     +(hits.length>200?' — showing the first 200, refine your search':'');
   $('results').innerHTML=hits.slice(0,200).map(r=>`
     <div class="card">
-      <div class="meta"><b>${esc(r.authority.toUpperCase())} ${hl(r.qa_id,terms)}</b>
-        ${r.joint_id?' · '+hl(r.joint_id,terms):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,terms):''}
-        ${r.topic?' · '+hl(r.topic,terms):''} · ${esc(r.status)}
+      <div class="meta"><b>${esc(r.authority.toUpperCase())} ${hl(r.qa_id,hre)}</b>
+        ${r.joint_id?' · '+hl(r.joint_id,hre):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,hre):''}
+        ${r.topic?' · '+hl(r.topic,hre):''} · ${esc(r.status)}${r.date?' · '+esc(r.date):''}
         ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
       <div class="label">Question</div>
-      <div class="a clampable">${hl(r.question,terms)}</div>
-      ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,terms)}</div>`:''}
+      <div class="a clampable">${hl(r.question,hre)}</div>
+      ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,hre)}</div>`:''}
       <div class="label">Answer</div>
-      <div class="a clampable">${hl(r.answer,terms)}</div>
+      <div class="a clampable">${hl(r.answer,hre)}</div>
       <button class="more" onclick="toggleCard(this)">show full Q&A ▾</button>
       · <a href="${esc(r.source_url)}" rel="noopener">original at the authority</a>
     </div>`).join('')||'<div class="count">No matches.</div>';

@@ -16,7 +16,8 @@ def rec(authority, qa_id, legal_act, **kw):
 
 
 def test_build_splits_per_family_and_writes_manifest(tmp_path):
-    write_record(tmp_path, rec("eba", "2024_1", "DORA"))
+    write_record(tmp_path, rec("eba", "2024_1", "DORA",
+                               dates={"final_publishing_date": "08/08/2025"}))
     write_record(tmp_path, rec("esma", "2356", "DORA-RTS-RMF"))
     write_record(tmp_path, rec("eba", "2013_2", "CRD"))
     (tmp_path / "docs").mkdir()
@@ -36,6 +37,8 @@ def test_build_splits_per_family_and_writes_manifest(tmp_path):
     r = next(x for x in dora if x["qa_id"] == "2024_1")
     assert r["question"] == "What is asked?"
     assert r["answer"] == "What is answered."
+    assert r["date"] == "2025-08-08"  # normalized publication date, for sorting
+    assert next(x for x in dora if x["qa_id"] == "2356")["date"] == ""
     assert r["file"] == "data/dora/eba-2024_1.md".replace("2024_1", "2024-1")
 
 

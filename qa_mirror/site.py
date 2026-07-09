@@ -45,6 +45,13 @@ def build(root: Path) -> int:
             "article": fm.get("article", ""),
             "topic": fm.get("topic", ""),
             "status": fm.get("status", ""),
+            # Publication date of the final answer (ISO, for display + newest-
+            # first sorting); key differs per source, oldest records only have
+            # a submission date.
+            "date": fm.get("date_final_publishing_date_iso")
+            or fm.get("date_publication_final_answer_iso")
+            or fm.get("date_submission_date_iso")
+            or "",
             "delisted": fm.get("x_delisted", ""),
             "source_url": fm.get("source_url", ""),
             "file": str(f.relative_to(root)),
