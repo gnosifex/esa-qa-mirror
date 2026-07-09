@@ -35,6 +35,11 @@ assert(!parseQuery('of the').length);
 
 // quoted phrase = exact contiguous match, whitespace-tolerant
 assert(m('"register of information"'));
+// typographic quotes (macOS/iOS auto-substitution) work like ASCII quotes
+assert(m('„register of information“'));   // German „…“
+assert(m('“register of information”'));   // English “…”
+assert.deepStrictEqual(parseQuery('„register of information“'),
+                       parseQuery('"register of information"'));
 assert(m('"ict third-party arrangement"'));
 assert(!matches(hay('information about the register'),
                 parseQuery('"register of information"')));

@@ -40,7 +40,8 @@
 conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
 the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
-  <input id="q" type="search" placeholder='Search questions &amp; answers… e.g. "register of information" OR subcontracting' autofocus>
+  <input id="q" type="search" placeholder='Search questions &amp; answers… e.g. "register of information" OR subcontracting' autofocus
+    autocorrect="off" autocapitalize="off" spellcheck="false">
   <select id="act"><option value="">All acts</option></select>
   <select id="auth"><option value="">All authorities</option></select>
 </div>
@@ -69,7 +70,10 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const STOP=new Set(['an','and','are','as','at','be','by','for','in','is','it','of','on','or','the','to','with']);
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 function parseQuery(q){ // → OR-groups of matchers [{kind:'word'|'phrase'|'re',v}]
-  const toks=String(q).match(/"[^"]*"|\/[^/]*\/|\S+/g)||[],groups=[[]];
+  // Typographic quotes → ASCII first: macOS/iOS keyboards auto-substitute
+  // "…" into “…”/„…“, which must still delimit a phrase.
+  const toks=String(q).replace(/[“”„‟«»]/g,'"').replace(/[‘’‚‛]/g,"'")
+    .match(/"[^"]*"|\/[^/]*\/|\S+/g)||[],groups=[[]];
   const cur=()=>groups[groups.length-1];
   for(const t of toks){
     if(/^or$/i.test(t)){if(cur().length)groups.push([]);continue;}
