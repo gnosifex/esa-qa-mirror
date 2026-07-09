@@ -16,7 +16,7 @@ date_submission_to_esas: "2024-02-14"
 date_submission_to_esas_iso: "2024-02-14"
 x_answered_by: "European Commission"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora030-2999_en"
-retrieved_at: "2026-07-08T20:14:40+00:00"
+retrieved_at: "2026-07-09T12:21:48+00:00"
 ---
 
 # EIOPA Q&A DORA030 - 2999
@@ -45,4 +45,4 @@ The answers clarify provisions already contained in the applicable legislation. 
 
 ---
 
-> **Disclaimer.** Unofficial, automatically generated mirror copy — no guarantee and no liability is accepted for accuracy, completeness or timeliness; conversion errors are possible. Before any use or reliance, verify against the original: <https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora030-2999_en> — the authority's portal version prevails. Content © the respective authority; reuse subject to its legal notice.
+> **Disclaimer.** Unofficial, automatically generated mirror copy — no guarantee and no liability is accepted for accuracy, completeness or timeliness; conversion errors are possible. Q&A answers speak as of their publication date: they refer to the legal acts in force at that time, and the authorities do not systematically revisit published Q&As after subsequent changes to the underlying legislation. Before any use or reliance, verify against the original: <https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora030-2999_en> — the authority's portal version prevails. Content © the respective authority; reuse subject to its legal notice.

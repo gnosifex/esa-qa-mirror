@@ -16,7 +16,7 @@ date_submission_to_esas: "2024-12-06"
 date_submission_to_esas_iso: "2024-12-06"
 x_answered_by: "Joint ESAs"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora188-3200_en"
-retrieved_at: "2026-07-08T20:15:44+00:00"
+retrieved_at: "2026-07-09T12:23:04+00:00"
 ---
 
 # EIOPA Q&A DORA188 - 3200
@@ -35,4 +35,4 @@ Appropriate information security standards refer to the industry best practices 
 
 ---
 
-> **Disclaimer.** Unofficial, automatically generated mirror copy — no guarantee and no liability is accepted for accuracy, completeness or timeliness; conversion errors are possible. Before any use or reliance, verify against the original: <https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora188-3200_en> — the authority's portal version prevails. Content © the respective authority; reuse subject to its legal notice.
+> **Disclaimer.** Unofficial, automatically generated mirror copy — no guarantee and no liability is accepted for accuracy, completeness or timeliness; conversion errors are possible. Q&A answers speak as of their publication date: they refer to the legal acts in force at that time, and the authorities do not systematically revisit published Q&As after subsequent changes to the underlying legislation. Before any use or reliance, verify against the original: <https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora188-3200_en> — the authority's portal version prevails. Content © the respective authority; reuse subject to its legal notice.
