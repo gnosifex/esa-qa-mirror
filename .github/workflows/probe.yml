@@ -75,40 +75,47 @@ jobs:
                 "status values:", Counter(r["status"] for r in dora))
           PY
 
-      - name: Investigate DORA Q&A 2025_7309 missing from the mirror
+      - name: Register rows with broken link cells — synthesis + live fetch check
         run: |
           python3 - <<'PY'
           from qa_mirror.common import Http
+          from qa_mirror import cli, register
+          http = Http(delay=1.5)
+          rows = register.fetch_rows()
+          broken = [r for r in rows
+                    if not str(r.get("link") or "").startswith("http")
+                    and r["status"] in ("Final", "Revised")]
+          print(f"{len(broken)} Final/Revised rows with non-URL link cells")
+          for r in broken:
+              cands = register.synth_links(r)
+              print(f"  {r['joint_id']} ({r['authority']}, {r['status']}): link={r['link']!r}")
+              print(f"    candidates: {cands}")
+              if cands:
+                  try:
+                      rec = cli._fetch_first(cli.ADAPTERS[r["authority"]], http, cands)
+                      print(f"    FETCH OK -> qa_id={rec.qa_id!r} status={rec.status!r}")
+                  except Exception as exc:
+                      print(f"    FETCH FAILED: {exc}")
+          PY
+      - name: Cross-check EBA DORA finals (act 20) against the register
+        run: |
+          python3 - <<'PY'
+          import re
+          from qa_mirror.common import Http
           from qa_mirror import eba, register
           http = Http(delay=1.0)
-          url = f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/2025_7309"
-          rec = eba.fetch_record(http, url)
-          print("=== detail page parse:")
-          print("qa_id:", rec.qa_id, "| status:", rec.status)
-          print("legal_act_raw:", rec.legal_act_raw)
-          print("topic:", rec.topic, "| article:", rec.article)
-          print("dates:", rec.dates)
-          print("extra:", {k: str(v)[:100] for k, v in rec.extra.items()})
-          print("=== register rows containing 7309:")
           rows = register.fetch_rows()
-          hits = [r for r in rows
-                  if "7309" in str(r.get("native_id") or "")
-                  or "7309" in str(r.get("link") or "")]
-          print(len(hits), "rows")
-          for r in hits:
-              print("  ", r)
-          print("=== EBA sectoral DORA-Reg (act 20) tab counts:")
-          print(eba.expected_counts(http, {"legal_act_ids": [20]}))
-          print("=== act-20 finals listing:")
-          urls = list(eba.list_detail_urls(http, {"legal_act_ids": [20], "max_pages": 30}))
-          ids = [u.rsplit("/", 1)[-1] for u in urls]
-          print(len(ids), "finals listed;",
-                "2025_7309 IS listed" if "2025_7309" in ids else "2025_7309 NOT listed")
           reg_ids = {str(r.get("link") or "").rstrip("/").rsplit("/", 1)[-1] for r in rows}
           reg_ids |= {str(r.get("native_id") or "") for r in rows}
-          solo = [i for i in ids if i not in reg_ids]
-          print("act-20 finals with NO register row (EBA-solo):", len(solo))
-          print("  ", solo)
+          for r in rows:  # ids embedded in broken (title-instead-of-URL) cells
+              m = re.search(r"\b(\d{4}_\d+)\b", str(r.get("link") or ""))
+              if m:
+                  reg_ids.add(m.group(1))
+          urls = list(eba.list_detail_urls(http, {"legal_act_ids": [20], "max_pages": 30}))
+          ids = [u.rsplit("/", 1)[-1] for u in urls]
+          solo = [i for i in ids
+                  if i not in reg_ids and i.split("_")[-1] not in reg_ids]
+          print(f"{len(ids)} EBA DORA finals; {len(solo)} without any register trace:", solo)
           PY
 
   # Raw looks at what the portals serve this runner.

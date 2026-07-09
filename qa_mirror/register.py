@@ -24,10 +24,13 @@ PowerBI protocol (reverse-engineered — undocumented, may change):
 from __future__ import annotations
 
 import datetime
+import re
 import sys
 import time
 
 import requests
+
+from . import eba, eiopa, esma
 
 from .common import USER_AGENT
 
@@ -223,12 +226,51 @@ def fetch_rows(session: requests.Session | None = None) -> list[dict]:
     return out
 
 
+_EBA_PUBLIC_ID_RE = re.compile(r"\b(\d{4}_\d+)\b")
+
+
+def synth_links(row: dict) -> list[str]:
+    """Candidate detail URLs for a register row whose link cell is unusable —
+    seen live 2026-07-09: DORA170 / EBA 2025_7309 carried the page *title*
+    instead of the URL. Derived per authority from the row's own ids (and any
+    id embedded in the broken cell); the caller tries candidates in order.
+    Empty when nothing can be derived."""
+    native = str(row.get("native_id") or "").strip()
+    joint = str(row.get("joint_id") or "").strip().lower()
+    text = str(row.get("link") or "")
+    if row["authority"] == "eba":
+        # EBA needs the full publicId (YYYY_NNNN); the register's native id is
+        # often the bare number, but broken cells tend to start with the id.
+        m = _EBA_PUBLIC_ID_RE.search(text) or _EBA_PUBLIC_ID_RE.search(native)
+        if m:
+            return [f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/{m.group(1)}"]
+    if row["authority"] == "esma":
+        nid = native if native.isdigit() else next(
+            iter(re.findall(r"\b\d{3,}\b", text)), "")
+        if nid:
+            return [f"{esma.BASE}/publications-data/questions-answers/{nid}"]
+    if row["authority"] == "eiopa":
+        # EIOPA slugs combine native id and joint id — in either order (both
+        # exist live: 2734-dora003_en and dora001-2622_en).
+        slug = re.sub(r"[^A-Za-z0-9]+", "-", native).strip("-").lower()
+        base = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
+        if joint and joint in slug:
+            return [f"{base}/{slug}_en"]
+        if slug and joint:
+            return [f"{base}/{slug}-{joint}_en", f"{base}/{joint}-{slug}_en"]
+    return []
+
+
 def discover(session, act_substr: str, statuses, authorities) -> list[dict]:
-    """Register rows for one act, restricted to the wanted statuses and to rows
-    that carry a usable http(s) link to a known authority. `act_substr` matches
-    the register's 'Legal act' (e.g. 'DORA'); `statuses` is a set of accepted
-    Status values (e.g. {'Final'}); `authorities` is the set of adapter keys we
-    can fetch (eba/eiopa/esma)."""
+    """Register rows for one act, restricted to the wanted statuses and to
+    authorities we can fetch (adapter keys eba/eiopa/esma). `act_substr`
+    matches the register's 'Legal act' (e.g. 'DORA') by substring.
+
+    Rows whose link cell is not a URL (register data-entry errors) get
+    synthesized candidate links (`link` + `link_alts`); rows where not even
+    that works are returned with link="" so the caller can fail *visibly* —
+    a wanted register row that cannot be fetched is a completeness hole, not
+    something to skip in silence."""
     rows = fetch_rows(session)
     want_status = {s.lower() for s in statuses}
     picked = []
@@ -240,6 +282,15 @@ def discover(session, act_substr: str, statuses, authorities) -> list[dict]:
         if row["authority"] not in authorities:
             continue
         if not row["link"].startswith("http"):
-            continue
+            cands = synth_links(row)
+            if cands:
+                print(f"[register] repaired link for {row['joint_id']} "
+                      f"({row['authority']}): {cands[0]}", file=sys.stderr)
+                row = {**row, "link": cands[0], "link_alts": cands[1:]}
+            else:
+                print(f"[register] WARNING: {row['joint_id']} "
+                      f"({row['authority']}, status {row['status']!r}) has no "
+                      "usable link and none could be derived", file=sys.stderr)
+                row = {**row, "link": ""}
         picked.append(row)
     return picked

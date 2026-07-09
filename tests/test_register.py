@@ -147,15 +147,50 @@ def test_pbi_gives_up_after_retries(monkeypatch):
         register._pbi(Sess(), "/public/reports/x")
 
 
-def test_discover_skips_rows_without_http_link(monkeypatch):
+def test_discover_repairs_rows_without_http_link(monkeypatch):
+    # The register sometimes carries the page *title* instead of the URL (seen
+    # live: DORA170 / EBA 2025_7309). Such rows must not vanish in silence —
+    # discover synthesizes candidate links from the row's own ids.
     def pbi_norows(session, path, payload=None):
         if "querydata" in path:
             d = {"results": [{"result": {"data": {"dsr": {"DS": [{
-                "ValueDicts": {**VALUE_DICTS, "D7": ["rejected", "n/a"]},
+                "ValueDicts": {**VALUE_DICTS,
+                               "D7": ["2622 SOME PAGE TITLE | EIOPA", "n/a"]},
                 "PH": [{"DM0": [_ROW_A, _ROW_B]}]}]}}}}]}
             return d
         return _fake_pbi(session, path, payload)
     monkeypatch.setattr(register, "_pbi", pbi_norows)
-    # links are now non-URLs ("rejected"/"n/a") → nothing discoverable
-    assert register.discover(object(), "DORA", {"Final", "Rejected"},
-                             {"eba", "eiopa", "esma"}) == []
+    picked = register.discover(object(), "DORA", {"Final", "Rejected"},
+                               {"eba", "eiopa", "esma"})
+    by_id = {r["joint_id"]: r for r in picked}
+    # EIOPA row: slug guessed in both orders (both exist live)
+    a = by_id["DORA001"]
+    assert a["link"] == ("https://www.eiopa.europa.eu/qa-regulation/"
+                         "questions-and-answers-database/2622-dora001_en")
+    assert a["link_alts"] == [("https://www.eiopa.europa.eu/qa-regulation/"
+                               "questions-and-answers-database/dora001-2622_en")]
+    # ESMA row: numeric native id is the whole detail path
+    b = by_id["DORA002"]
+    assert b["link"] == "https://www.esma.europa.eu/publications-data/questions-answers/2103"
+
+
+def test_synth_links_per_authority():
+    assert register.synth_links({
+        "authority": "eba", "native_id": "7309", "joint_id": "DORA170",
+        "link": "2025_7309 ANNUAL REPORT ON NEW ARRANGEMENTS | EBA",
+    }) == ["https://www.eba.europa.eu/single-rule-book-qa/qna/view/publicId/2025_7309"]
+    # EBA without a full publicId anywhere → underivable (bare number lacks the year)
+    assert register.synth_links({
+        "authority": "eba", "native_id": "7309", "joint_id": "DORA170",
+        "link": "no link",
+    }) == []
+    # EIOPA native id that already contains the joint id → single slug
+    assert register.synth_links({
+        "authority": "eiopa", "native_id": "2734 - DORA003", "joint_id": "DORA003",
+        "link": "n/a",
+    }) == ["https://www.eiopa.europa.eu/qa-regulation/"
+           "questions-and-answers-database/2734-dora003_en"]
+    assert register.synth_links(
+        {"authority": "esma", "native_id": "2103", "joint_id": "DORA050",
+         "link": "-"},
+    ) == ["https://www.esma.europa.eu/publications-data/questions-answers/2103"]

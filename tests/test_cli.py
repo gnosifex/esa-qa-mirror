@@ -143,6 +143,41 @@ def test_authority_filter_restricts_rows(root, monkeypatch):
     assert not (root / "data" / "dora" / "eiopa-2622.md").exists()
 
 
+def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
+    # a repaired register row carries guessed candidates; the first one 404s,
+    # the alternate resolves — the record must be mirrored from the alternate
+    r = dict(row("DORA001", "eiopa", "2622"),
+             link="https://portal/eiopa/2622-dora001",
+             link_alts=["https://portal/eiopa/dora001-2622"])
+    monkeypatch.setattr(cli.register, "discover",
+                        lambda session, act, statuses, auths: [r])
+
+    def fetch(http, url):
+        if url.endswith("2622-dora001"):
+            raise RuntimeError("404")
+        return Record(authority="eiopa", qa_id="2622", source_url=url,
+                      question="Q", answer="A")
+    monkeypatch.setattr(eiopa, "fetch_record", fetch)
+
+    assert run(root) == 0
+    text = (root / "data" / "dora" / "eiopa-2622.md").read_text()
+    assert "dora001-2622" in text  # the alternate is the recorded source
+
+
+def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    run(root)  # mirrors eiopa 2622 with a working link
+    # next pass: the same row's link cell is broken beyond repair (link="")
+    rows = default_rows()
+    rows[0] = dict(rows[0], link="")
+    monkeypatch.setattr(cli.register, "discover",
+                        lambda session, act, statuses, auths:
+                        [r for r in rows if r["status"] == "Final"])
+    assert run(root) == 1  # red: a wanted register row is unreachable
+    # the previously mirrored copy is protected from delisting
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
+
+
 def test_register_failure_is_error_and_suppresses_delisting(root, monkeypatch):
     # first, a good run to populate state
     install(monkeypatch, default_rows())

@@ -77,6 +77,18 @@ def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _fetch_first(adapter, http, urls):
+    """Fetch the first URL that resolves. Alternates only exist for register
+    rows with repaired links, where the first candidate is a guess — for
+    ordinary rows the list has one entry and this is a plain fetch."""
+    for u in urls[:-1]:
+        try:
+            return adapter.fetch_record(http, u)
+        except Exception:
+            continue
+    return adapter.fetch_record(http, urls[-1])
+
+
 def _write_delta(root, state, rec, args, totals, auth, tag):
     """Finalize timestamp + write the record only if new/changed. Returns True
     if it was written."""
@@ -111,8 +123,18 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             n += 1
             auth = row["authority"]
             tag = f"{auth}:{act_name}"
+            if not row["link"]:
+                # register data-entry error that not even link synthesis could
+                # fix — the record exists but is unreachable: fail visibly and
+                # protect any previously mirrored copy from delisting.
+                print(f"[{tag}] ERROR: register row {row['joint_id']} has no "
+                      "usable link — record unreachable", file=sys.stderr)
+                totals[auth]["errors"] += 1
+                complete[auth] = False
+                continue
             try:
-                rec = ADAPTERS[auth].fetch_record(http, row["link"])
+                rec = _fetch_first(ADAPTERS[auth], http,
+                                   [row["link"], *row.get("link_alts", [])])
                 # register metadata is authoritative for the shared/joint fields.
                 # The legal act especially: a joint Q&A can straddle acts (e.g. a
                 # DORA/MiCA VASP question), and the receiving portal may tag it by
