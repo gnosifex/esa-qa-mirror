@@ -9,14 +9,14 @@ Two bodies of Q&As matter for a credit institution, and this tool covers both:
 - **Joint ESAs Q&As** — cross-sectoral acts answered jointly by EBA/EIOPA/ESMA. **DORA** is the one that binds banks today. These are discovered through the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas), then fetched from whichever authority's webtool received the question.
 - **EBA Single Rulebook Q&As** — the banking-sector acts that live solely at the EBA: **CRD** out of the box, with **CRR / PSD2 / BRRD / MiCAR** a one-line config change.
 
-**Why:** the portals use different frontends, different formats and poor search, and the joint corpus is scattered across three authorities. Supervisory interpretations that materially affect how an article must be read are effectively undiscoverable by web search. This tool turns that open, growing corpus into an enumerable local corpus you can search, diff and cite — and keeps it current via scheduled delta runs. Only **final** Q&As are mirrored.
+**Why:** the authorities publish these Q&As as individual web pages made for interactive reading — three webtools, three formats. What's missing is the corpus **as data**: everything in one grip, normalized and machine-readable. These supervisory interpretations materially affect how an article must be read, and having all of them enumerable in one repository makes them not just searchable, diffable and citable, but directly usable as an **LLM-ready knowledge base** — feed `data/` to an AI assistant for retrieval, cross-cutting analysis or drafting support. That is what this mirror provides: one Markdown file per Q&A with uniform frontmatter, kept current via scheduled delta runs. Only **final** Q&As are mirrored.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-python -m qa_mirror                 # full delta run per config.yaml
 python -m qa_mirror --limit 5       # smoke test: max 5 records per source
+python -m qa_mirror                 # full delta run per config.yaml (first run mirrors everything — takes a while)
 python -m qa_mirror --authority eba # one receiving authority only
 python -m qa_mirror.site            # rebuild the docs/ search index from data/
 ```
@@ -55,7 +55,7 @@ The EBA `legal_act_ids` are the portal's own `qa_legal_act[]` facet values — f
 
 ## Using this mirror for research
 
-**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Search state lives in the URL (`?q=…&act=…&auth=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so filtered searches stay fast as the corpus grows. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
+**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Words match at word start (`art. 28` finds Article 28), `"…"` searches an exact phrase, `OR`/`AND` combine terms, `/…/` is a regex, and results list the newest answers first with their publication date. Search state lives in the URL (`?q=…&act=…&auth=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so act-filtered searches only download the records they need. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
 
 With a (free) GitHub account, GitHub's code search also works:
 
@@ -63,7 +63,7 @@ With a (free) GitHub account, GitHub's code search also works:
 - **Filter by article/act:** search for frontmatter values, e.g. `repo:gnosifex/esa-qa-mirror "article: \"28\"" DORA`.
 - **What's new:** the commit history of `data/` *is* the change log — each weekly bot commit shows exactly which Q&As were added or revised.
 
-Locally it gets better: clone and `grep -rl 'subcontracting' data/dora/`, or open `data/` as an **Obsidian vault** — the frontmatter is deliberately single-line/Obsidian-compatible, so every record renders with filterable properties.
+Locally it gets better: clone and `grep -rl 'subcontracting' data/dora/`, open `data/` as an **Obsidian vault** — the frontmatter is deliberately single-line/Obsidian-compatible, so every record renders with filterable properties — or point an **LLM / AI agent** at `data/`: one file per Q&A with uniform frontmatter is trivially easy for machines to enumerate, filter and quote.
 
 Always verify against the linked source before relying on a record (see the per-record disclaimer).
 
