@@ -209,3 +209,63 @@ jobs:
           echo "=== archive page=1 retry (cache-bust):"
           curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/archive?page=1&cb=$RANDOM" -o a1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
           grep -c 'single-rule-book-qa/qna/view/publicId' a1b.html || true
+      - name: EBA AJAX listing — drupalSettings ajaxViews, views/ajax POST, count endpoint
+        run: |
+          pip install --quiet requests
+          python3 - <<'PY'
+          import json, re, requests
+          UA = {"User-Agent": "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; probe)"}
+          s = requests.Session()
+          base = "https://www.eba.europa.eu"
+
+          # flakiness measurement: how often is the listing server-rendered?
+          for i in range(4):
+              r = s.get(f"{base}/single-rule-book-qa/search",
+                        params={"qa_legal_act[]": "32", "cb": i}, headers=UA, timeout=30)
+              n = len(re.findall(r"qna/view/publicId", r.text))
+              print(f"plain fetch {i}: HTTP {r.status_code}, publicId hits: {n}")
+
+          # the All tab — server-rendered?
+          r = s.get(f"{base}/single-rule-book-qa/all", params={"qa_legal_act[0]": "32"},
+                    headers=UA, timeout=30)
+          print("all-tab: HTTP", r.status_code, "publicId hits:",
+                len(re.findall(r"qna/view/publicId", r.text)))
+
+          # extract drupalSettings from the search page
+          r = s.get(f"{base}/single-rule-book-qa/search",
+                    params={"qa_legal_act[]": "32"}, headers=UA, timeout=30)
+          m = re.search(r'data-drupal-selector="drupal-settings-json">(.*?)</script>',
+                        r.text, re.S)
+          if not m:
+              print("NO drupalSettings found"); raise SystemExit(0)
+          cfg = json.loads(m.group(1))
+          views = (cfg.get("views") or {}).get("ajaxViews") or {}
+          print("ajaxViews instances:", len(views))
+          for k, v in views.items():
+              print(" ", k, json.dumps(v)[:400])
+          print("eba_qa settings:", json.dumps(cfg.get("eba_qa", {}))[:300])
+
+          # try the views/ajax POST the frontend pager uses
+          for k, v in list(views.items())[:1]:
+              data = {
+                  "view_name": v.get("view_name"),
+                  "view_display_id": v.get("view_display_id"),
+                  "view_args": v.get("view_args", ""),
+                  "view_path": v.get("view_path", ""),
+                  "view_base_path": v.get("view_base_path", ""),
+                  "view_dom_id": v.get("view_dom_id", ""),
+                  "pager_element": v.get("pager_element", 0),
+                  "page": 1,
+                  "qa_legal_act[]": "32",
+              }
+              r = s.post(f"{base}/views/ajax", data=data, headers={
+                  **UA, "X-Requested-With": "XMLHttpRequest"}, timeout=30)
+              print("views/ajax POST:", r.status_code, "publicId hits:",
+                    len(re.findall(r"qna/view/publicId", r.text)))
+              print("  body head:", r.text[:300].replace("\n", " "))
+
+          # count endpoint, as the frontend calls it (XHR header)
+          r = s.get(f"{base}/qa-search-count", params={"qa_legal_act[]": "32"},
+                    headers={**UA, "X-Requested-With": "XMLHttpRequest"}, timeout=30)
+          print("qa-search-count XHR:", r.status_code, "body:", r.text[:400].replace("\n", " "))
+          PY
