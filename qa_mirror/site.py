@@ -63,6 +63,8 @@ def build(root: Path) -> int:
             or "",
             "delisted": fm.get("x_delisted", ""),
             "archived": fm.get("x_archived", ""),
+            # date of the last (re)write = when a change was last mirrored
+            "mirrored": str(fm.get("retrieved_at", ""))[:10],
             "source_url": fm.get("source_url", ""),
             "file": str(f.relative_to(root)),
             "question": (q.group(1).strip() if q else ""),
@@ -73,12 +75,12 @@ def build(root: Path) -> int:
     docs.mkdir(exist_ok=True)
     for old in docs.glob("records*.json"):  # drop stale per-family files
         old.unlink()
-    manifest = {}
+    families = {}
     total = 0
     for family, records in sorted(by_family.items()):
         out = docs / f"records-{family}.json"
         out.write_text(json.dumps(records, ensure_ascii=False), encoding="utf-8")
-        manifest[family] = {
+        families[family] = {
             "file": out.name,
             "count": len(records),
             "acts": sorted({r["legal_act"] for r in records if r["legal_act"]}),
@@ -86,6 +88,20 @@ def build(root: Path) -> int:
         }
         total += len(records)
         print(f"site: {len(records)} records → {out}")
+    # Verification status from state.json (committed alongside the corpus):
+    # the search page shows how fresh the mirror's checks are.
+    state = {}
+    if (root / "state.json").exists():
+        state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+    verified = [v for v in (state.get("verified_at") or {}).values() if v]
+    manifest = {
+        "meta": {
+            "total": total,
+            "last_full_sweep": state.get("last_full_sweep", ""),
+            "oldest_verified": min(verified)[:10] if verified else "",
+        },
+        "families": families,
+    }
     (docs / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8"
     )

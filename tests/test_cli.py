@@ -39,8 +39,10 @@ def install(monkeypatch, rows, eba_listing=None, eba_counts=None, eba_archive=No
     for auth, mod in (("eiopa", eiopa), ("esma", esma), ("eba", eba)):
         monkeypatch.setattr(mod, "fetch_record", fetch_for(auth))
     if eba_listing is not None:
-        monkeypatch.setattr(eba, "list_detail_urls",
-                            lambda http, params, **kw: iter(eba_listing))
+        def listing(http, params, published_since="", **kw):
+            # the window listing (published_since set) is empty by default
+            return iter([] if published_since else eba_listing)
+        monkeypatch.setattr(eba, "list_detail_urls", listing)
     # never let unit tests hit the live count/archive endpoints
     monkeypatch.setattr(eba, "expected_counts",
                         lambda http, params: dict(eba_counts or {}))
@@ -303,12 +305,82 @@ def test_run_manifest_written_for_full_runs_only(root, monkeypatch):
     assert len(lines) == 1
     import json
     entry = json.loads(lines[0])
+    assert entry["mode"] == "sweep"  # nothing ever swept → first run sweeps
     assert entry["totals"]["eiopa"]["written"] == 2
     assert len(entry["state_sha256"]) == 64
     assert entry["ts"]
     # a --limit smoke run must not pollute the audit trail
     run(root, "--limit", "1")
     assert len((root / "runs.jsonl").read_text().strip().splitlines()) == 1
-    # the next full run appends
+    # the next full run appends — and is incremental now
     run(root)
-    assert len((root / "runs.jsonl").read_text().strip().splitlines()) == 2
+    lines = (root / "runs.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[1])["mode"] == "incremental"
+
+
+def manifest_line(root, n):
+    import json
+    return json.loads((root / "runs.jsonl").read_text().splitlines()[n])
+
+
+def test_incremental_run_skips_recently_verified_records(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root) == 0  # auto-sweep stamps every record's verified_at
+    def boom(http, url):
+        raise AssertionError("no detail fetch expected right after a sweep")
+    for mod in (eiopa, esma, eba):
+        monkeypatch.setattr(mod, "fetch_record", boom)
+    assert run(root) == 0  # enumeration only — nothing stale, nothing new
+    line = manifest_line(root, 1)
+    assert line["mode"] == "incremental"
+    assert all(t["checked"] == 0 for t in line["totals"].values())
+
+
+def test_recently_published_row_is_refetched_in_window(root, monkeypatch):
+    from datetime import datetime, timezone
+    rows = default_rows()
+    rows[0]["date_publication"] = datetime.now(timezone.utc).date().isoformat()
+    install(monkeypatch, rows)
+    run(root)
+    assert run(root) == 0
+    line = manifest_line(root, 1)
+    assert line["totals"]["eiopa"]["checked"] == 1  # only the fresh publication
+    assert line["totals"]["esma"]["checked"] == 0
+
+
+def test_verification_queue_prefers_oldest_within_budget(root, monkeypatch):
+    (root / "config.yaml").write_text(
+        JOINT_CFG + "incremental:\n  daily_verify_budget: 1\n", encoding="utf-8")
+    install(monkeypatch, default_rows())
+    run(root)
+    state = State(root / "state.json")
+    state.data["verified_at"]["eiopa:2622"] = "2020-01-01T00:00:00+00:00"
+    state.data["verified_at"]["eiopa:2734"] = "2020-02-01T00:00:00+00:00"
+    state.save()  # esma:2103 keeps its fresh stamp
+    assert run(root) == 0
+    line = manifest_line(root, 1)
+    assert line["totals"]["eiopa"]["checked"] == 1  # budget 1 → oldest only
+    assert line["totals"]["esma"]["checked"] == 0
+    after = State(root / "state.json")
+    assert after.verified_at("eiopa:2622") > "2021"        # re-verified
+    assert after.verified_at("eiopa:2734").startswith("2020-02")  # still queued
+
+
+def test_sweep_is_due_driven_and_self_retrying(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    run(root)
+    state = State(root / "state.json")
+    first_sweep = state.data["last_full_sweep"]
+    assert first_sweep
+    state.data["last_full_sweep"] = "2020-01-01"  # long overdue
+    state.save()
+    assert run(root) == 0
+    assert manifest_line(root, 1)["mode"] == "sweep"
+    assert State(root / "state.json").data["last_full_sweep"] == first_sweep
+
+
+def test_sweep_marker_not_set_by_limited_runs(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root, "--limit", "1") == 0
+    assert State(root / "state.json").data["last_full_sweep"] == ""

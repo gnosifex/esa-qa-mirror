@@ -44,10 +44,22 @@ def _act_query(params: dict) -> str:
     return "&".join(f"qa_legal_act%5B%5D={a}" for a in params.get("legal_act_ids", []))
 
 
-def list_detail_urls(http: Http, params: dict, max_pages: int = 0):
+def _facet_date(iso: str) -> str:
+    """The search form's date fields use the portal's display format
+    (DD/MM/YYYY), URL-encoded."""
+    y, m, d = iso.split("-")
+    return f"{d}%2F{m}%2F{y}"
+
+
+def list_detail_urls(http: Http, params: dict, max_pages: int = 0,
+                     published_since: str = ""):
     """Yield detail URLs for the configured legal-act filter, all pages.
-    /search lists final Q&As only (the other statuses live on sibling tabs)."""
+    /search lists final Q&As only (the other statuses live on sibling tabs).
+    published_since (ISO date) narrows the listing to Q&As whose final answer
+    was published on/after that date — the incremental runs' window."""
     q = _act_query(params)
+    if published_since:
+        q += f"&qa_final_publishing_date_start={_facet_date(published_since)}"
     for link in iter_listing(
         http,
         lambda page: f"{BASE}/single-rule-book-qa/search?{q}&page={page}",
