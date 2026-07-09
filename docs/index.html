@@ -25,6 +25,8 @@
   .ddopts { position:absolute; z-index:10; top:calc(100% + 4px); left:0; min-width:230px; max-height:280px; overflow:auto; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:.45rem .7rem; box-shadow:0 4px 14px rgba(0,0,0,.18); }
   .ddopts label { display:block; font-size:.9rem; padding:.18rem 0; cursor:pointer; white-space:nowrap; }
   .ddopts input { margin-right:.4rem; }
+  .ddall { padding-bottom:.3rem; border-bottom:1px solid var(--border); margin-bottom:.3rem; }
+  .ddall button { margin-right:.5rem; }
   .count { color:var(--muted); font-size:.86rem; margin:.3rem 0 .8rem; }
   .hint { color:var(--muted); font-size:.76rem; margin:-.4rem 0 .8rem; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
@@ -57,6 +59,7 @@ the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
   <input id="to" type="date" title="published until (final publishing date)">
 </div>
 <div class="hint">words match at word start (<i>art. 28</i> finds Article&nbsp;28) · <i>"…"</i> exact phrase · <i>OR</i>&thinsp;/&thinsp;<i>AND</i> · <i>/…/</i> regex · newest first · date range = final publishing date</div>
+<div class="hint" id="fresh"></div>
 <div class="count" id="count">Loading…</div>
 <div id="results"></div>
 <div class="disclaimer"><b>Disclaimer.</b> Unofficial, automatically generated mirror — no liability for accuracy,
@@ -66,7 +69,7 @@ version prevails. Content © EBA / EIOPA / ESMA, reuse subject to their legal no
 // Records are split per act family (records-<family>.json, see manifest.json)
 // and fetched lazily: an act-filtered search only loads that family's file,
 // and nothing is downloaded until the first search/filter interaction.
-let MANIFEST={},CACHE={},TOTAL=0,seq=0;
+let MANIFEST={},META={},CACHE={},TOTAL=0,seq=0;
 const $=id=>document.getElementById(id);
 function toggleCard(btn){const card=btn.closest('.card');card.classList.toggle('open');
   btn.textContent=card.classList.contains('open')?'collapse ▴':'show full Q&A ▾';}
@@ -157,7 +160,7 @@ function render(R){
     <div class="card">
       <div class="meta"><b>${esc(r.authority.toUpperCase())} ${hl(r.qa_id,hre)}</b>
         ${r.joint_id?' · '+hl(r.joint_id,hre):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,hre):''}
-        ${r.topic?' · '+hl(r.topic,hre):''} · ${esc(r.status)}${r.date?' · '+esc(r.date):''}
+        ${r.topic?' · '+hl(r.topic,hre):''} · ${esc(r.status)}${r.date?' · '+esc(r.date):''}${r.mirrored?' · <span title="last change mirrored">mirrored '+esc(r.mirrored)+'</span>':''}
         ${r.archived?' · <b>⚠ archived at the authority after a review (since '+esc(r.archived)+')</b>':''}
         ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
       <div class="label">Question</div>
@@ -170,10 +173,25 @@ function render(R){
     </div>`).join('')||'<div class="count">No matches.</div>';
 }
 fetch('manifest.json').then(r=>r.json()).then(m=>{
-  MANIFEST=m;
-  const fams=Object.values(m);
+  MANIFEST=m.families||m;META=m.meta||{};
+  const fams=Object.values(MANIFEST);
   TOTAL=fams.reduce((s,f)=>s+f.count,0);
+  if(META.last_full_sweep||META.oldest_verified){
+    $('fresh').textContent='mirror checks: presence daily · content re-verified rolling'
+      +(META.oldest_verified?' (oldest '+META.oldest_verified+')':'')
+      +(META.last_full_sweep?' · last full sweep '+META.last_full_sweep:'');
+  }
   const allActs=[...new Set(fams.flatMap(f=>f.acts))].sort();
+  const setAll=on=>{ACTS.clear();if(on)allActs.forEach(a=>ACTS.add(a));
+    [...$('actopts').querySelectorAll('input')].forEach(c=>c.checked=on);
+    actSummary();update();};
+  const ctl=document.createElement('div');ctl.className='ddall';
+  for(const[txt,on]of[['all',true],['none',false]]){
+    const b=document.createElement('button');b.type='button';b.className='more';
+    b.textContent=txt;b.addEventListener('click',()=>setAll(on));
+    ctl.appendChild(b);ctl.appendChild(document.createTextNode(' '));
+  }
+  $('actopts').appendChild(ctl);
   for(const v of allActs){
     const l=document.createElement('label'),c=document.createElement('input');
     c.type='checkbox';c.value=v;

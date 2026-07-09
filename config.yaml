@@ -5,6 +5,19 @@
 
 delay_seconds: 1.5
 
+# Incremental operation. Enumeration (register + EBA listing pages) runs in
+# full on EVERY run — presence/absence, delisting, archive resolution and the
+# count checks stay daily. Detail pages are fetched for new/reappearing
+# records, recent publications (window), and the oldest-verified records
+# within the daily budget. A full content sweep runs whenever the last
+# completed one is older than sweep_after_days — state-driven, so a failed
+# sweep simply retries on the next run (no calendar coupling).
+incremental:
+  verify_after_days: 7      # re-check each record's content at least this often
+  daily_verify_budget: 600  # cap on queue-driven detail fetches per run
+  window_days: 14           # re-fetch anything published in the last N days
+  sweep_after_days: 31      # full re-verification due after this many days
+
 # Joint ESAs Q&As — discovered via the Joint Q&A Register (the canonical index
 # of Q&As answered jointly across EBA/EIOPA/ESMA). One register query returns
 # every joint Q&A with its receiving authority, native detail-page id and a

@@ -249,7 +249,7 @@ class Record:
         return self
 
     def slug(self) -> str:
-        s = re.sub(r"[^A-Za-z0-9]+", "-", self.qa_id).strip("-").lower()
+        s = slug_of(self.qa_id)
         return s or hashlib.sha1(self.source_url.encode()).hexdigest()[:12]
 
     def to_markdown(self) -> str:
@@ -331,8 +331,16 @@ class Record:
 DELISTED_HASH_PREFIX = "delisted:"
 
 
+def slug_of(raw: str) -> str:
+    """Slug normalization shared by Record.slug() and URL-tail derivation —
+    the two must agree, or listing-based presence checks would drift."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", raw).strip("-").lower()
+
+
 class State:
-    """Tracks known records for delta runs (state.json at repo root)."""
+    """Tracks known records for delta runs (state.json at repo root), plus
+    per-record verification timestamps and the last completed full sweep —
+    the state that drives the incremental fetch selection."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -340,9 +348,20 @@ class State:
         self.data = {"records": {}}
         if path.exists():
             self.data = json.loads(path.read_text(encoding="utf-8"))
+        self.data.setdefault("records", {})
+        self.data.setdefault("verified_at", {})
+        self.data.setdefault("last_full_sweep", "")
 
     def key(self, rec: Record) -> str:
         return f"{rec.authority}:{rec.slug()}"
+
+    def verified_at(self, key: str) -> str:
+        return self.data["verified_at"].get(key, "")
+
+    def mark_verified(self, key: str, ts: str):
+        """Record that this record's content was checked against the portal at
+        `ts` — set on every successful fetch, whether or not anything changed."""
+        self.data["verified_at"][key] = ts
 
     def is_new_or_changed(self, rec: Record) -> bool:
         if self.data["records"].get(self.key(rec)) != rec.content_hash():

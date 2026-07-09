@@ -28,11 +28,13 @@ def test_build_splits_per_family_and_writes_manifest(tmp_path):
     assert site.build(tmp_path) == 0
 
     manifest = json.loads((tmp_path / "docs" / "manifest.json").read_text("utf-8"))
-    assert set(manifest) == {"dora", "crd"}
-    assert manifest["dora"]["count"] == 2
-    assert manifest["dora"]["acts"] == ["DORA", "DORA-RTS-RMF"]
-    assert manifest["dora"]["authorities"] == ["eba", "esma"]
-    assert manifest["crd"]["file"] == "records-crd.json"
+    fams = manifest["families"]
+    assert set(fams) == {"dora", "crd"}
+    assert fams["dora"]["count"] == 2
+    assert fams["dora"]["acts"] == ["DORA", "DORA-RTS-RMF"]
+    assert fams["dora"]["authorities"] == ["eba", "esma"]
+    assert fams["crd"]["file"] == "records-crd.json"
+    assert manifest["meta"]["total"] == 3
     assert not (tmp_path / "docs" / "records.json").exists()  # stale file removed
 
     dora = json.loads((tmp_path / "docs" / "records-dora.json").read_text("utf-8"))
@@ -40,6 +42,7 @@ def test_build_splits_per_family_and_writes_manifest(tmp_path):
     assert r["question"] == "What is asked?"
     assert r["answer"] == "What is answered."
     assert r["date"] == "2025-08-08"  # normalized publication date, for sorting
+    assert r["mirrored"] == "2026-07-08"  # from retrieved_at
     assert next(x for x in dora if x["qa_id"] == "2356")["date"] == ""
     assert r["file"] == "data/dora/eba-2024_1.md".replace("2024_1", "2024-1")
 
@@ -89,3 +92,17 @@ def test_build_normalizes_article_for_display(tmp_path):
     dora = json.loads((tmp_path / "docs" / "records-dora.json").read_text("utf-8"))
     by_id = {r["qa_id"]: r["article"] for r in dora}
     assert by_id == {"1": "28", "2": "", "3": "28"}
+
+
+def test_build_exposes_verification_meta_from_state(tmp_path):
+    import json as j
+    write_record(tmp_path, rec("eba", "1", "DORA"))
+    (tmp_path / "state.json").write_text(j.dumps({
+        "records": {}, "last_full_sweep": "2026-07-01",
+        "verified_at": {"eba:1": "2026-07-05T10:00:00+00:00",
+                        "eba:2": "2026-07-09T10:00:00+00:00"},
+    }), encoding="utf-8")
+    site.build(tmp_path)
+    meta = j.loads((tmp_path / "docs" / "manifest.json").read_text("utf-8"))["meta"]
+    assert meta["last_full_sweep"] == "2026-07-01"
+    assert meta["oldest_verified"] == "2026-07-05"

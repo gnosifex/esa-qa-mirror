@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -46,24 +46,25 @@ def _write_step_summary(totals: dict):
     lines = [
         "## Mirror run",
         "",
-        "| authority | seen | written | archived | delisted | errors |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| authority | seen | checked | written | archived | delisted | errors |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for auth, t in totals.items():
         lines.append(
-            f"| {auth} | {t['seen']} | {t['written']} | {t['archived']} "
-            f"| {t['delisted']} | {t['errors']} |"
+            f"| {auth} | {t['seen']} | {t['checked']} | {t['written']} "
+            f"| {t['archived']} | {t['delisted']} | {t['errors']} |"
         )
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
 
 
-def _write_run_manifest(root: Path, args, sel, totals):
+def _write_run_manifest(root: Path, args, sel, totals, mode):
     """Append one JSON line per completed run to runs.jsonl — the committed,
     retention-free proof that a run happened even when nothing changed
     ("checked and unchanged" vs "never ran"). Skipped for --limit smoke runs."""
     line = {
         "ts": _now(),
+        "mode": "sweep" if mode["sweep"] else "incremental",
         "authorities": sorted(sel),
         "full": bool(args.full),
         "totals": totals,
@@ -75,6 +76,56 @@ def _write_run_manifest(root: Path, args, sel, totals):
 
 def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _slug_from_url(url: str) -> str:
+    """State-key slug derived from a detail URL's tail — must agree with
+    Record.slug() (verified against all mirrored records; a drift is
+    self-correcting: the record merely looks new and gets fetched, and the
+    post-fetch seen/verified bookkeeping uses the record's real key)."""
+    return common.slug_of(url.rstrip("/").rsplit("/", 1)[-1].removesuffix("_en"))
+
+
+def _run_mode(state, cfg, args) -> dict:
+    """Decide what this run fetches. State-driven, not calendar-driven: a full
+    sweep happens whenever the last completed one is too old (so a failed
+    sweep retries on the next run), the verification queue picks the
+    oldest-checked records first (so missed days heal themselves)."""
+    inc = cfg.get("incremental") or {}
+    now = datetime.now(timezone.utc)
+    sweep_after = int(inc.get("sweep_after_days", 31))
+    last_sweep = state.data.get("last_full_sweep", "")
+    due = (not last_sweep
+           or last_sweep < (now - timedelta(days=sweep_after)).date().isoformat())
+    stale = now - timedelta(days=int(inc.get("verify_after_days", 7)))
+    window = now - timedelta(days=int(inc.get("window_days", 14)))
+    return {
+        "sweep": bool(args.full or args.sweep or due),
+        "stale_before": stale.isoformat(timespec="seconds"),
+        "window_start": window.date().isoformat(),
+        "budget": int(inc.get("daily_verify_budget", 600)),
+    }
+
+
+def _select(entries, state, mode):
+    """Pick which enumerated records to fetch: everything on a sweep;
+    otherwise new/reappearing records and recent publications (must-fetch),
+    plus the oldest-verified records within the run's budget. Entries are
+    (key, in_window, payload)."""
+    must, rest = [], []
+    for e in entries:
+        h = state.data["records"].get(e[0])
+        if (mode["sweep"] or h is None
+                or h.startswith(common.DELISTED_HASH_PREFIX) or e[1]):
+            must.append(e)
+        else:
+            rest.append(e)
+    stale = sorted((e for e in rest
+                    if state.verified_at(e[0]) <= mode["stale_before"]),
+                   key=lambda e: (state.verified_at(e[0]), e[0]))
+    take = stale[:max(0, mode["budget"])]
+    mode["budget"] -= len(take)
+    return must + take
 
 
 def _fetch_first(adapter, http, urls):
@@ -103,9 +154,10 @@ def _write_delta(root, state, rec, args, totals, auth, tag):
     return False
 
 
-def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, complete):
-    """Discover joint Q&As via the register and fetch each receiving authority's
-    detail page."""
+def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, complete,
+                  mode):
+    """Discover joint Q&As via the register; the register enumeration is always
+    complete (presence, delisting), detail pages are fetched per _select."""
     for act_name, act in (cfg.get("joint_acts") or {}).items():
         statuses = set(act.get("statuses") or ["Final"])
         try:
@@ -116,22 +168,30 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 complete[a] = False
                 totals[a]["errors"] += 1
             continue
-        n = 0
+        entries = []
         for row in rows:
+            auth = row["authority"]
+            if not row["link"]:
+                # register data-entry error that not even link synthesis could
+                # fix — the record exists but is unreachable: fail visibly and
+                # protect any previously mirrored copy from delisting.
+                print(f"[{auth}:{act_name}] ERROR: register row "
+                      f"{row['joint_id']} has no usable link — record "
+                      "unreachable", file=sys.stderr)
+                totals[auth]["errors"] += 1
+                complete[auth] = False
+                continue
+            key = f"{auth}:{_slug_from_url(row['link'])}"
+            seen[auth].add(key)
+            in_window = (row.get("date_publication") or "") >= mode["window_start"]
+            entries.append((key, in_window, row))
+        n = 0
+        for _, _, row in _select(entries, state, mode):
             if args.limit and n >= args.limit:
                 break
             n += 1
             auth = row["authority"]
             tag = f"{auth}:{act_name}"
-            if not row["link"]:
-                # register data-entry error that not even link synthesis could
-                # fix — the record exists but is unreachable: fail visibly and
-                # protect any previously mirrored copy from delisting.
-                print(f"[{tag}] ERROR: register row {row['joint_id']} has no "
-                      "usable link — record unreachable", file=sys.stderr)
-                totals[auth]["errors"] += 1
-                complete[auth] = False
-                continue
             try:
                 rec = _fetch_first(ADAPTERS[auth], http,
                                    [row["link"], *row.get("link_alts", [])])
@@ -162,7 +222,9 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 if row["date_publication"]:
                     rec.dates.setdefault("publication_final_answer", row["date_publication"])
                 rec.finalize({"default_act_ref": act.get("act_ref", "")})
-                seen[auth].add(state.key(rec))
+                seen[auth].add(state.key(rec))  # real key, in case slug derivation drifted
+                state.mark_verified(state.key(rec), _now())
+                totals[auth]["checked"] += 1
                 _write_delta(root, state, rec, args, totals, auth, tag)
             except Exception as exc:  # one bad detail page must not stop the run
                 totals[auth]["errors"] += 1
@@ -176,8 +238,10 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
 _EBA_PER_PAGE = 20  # listing page size of the EBA search (verified 2026-07-09)
 
 
-def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
-    """EBA sectoral (banking) acts via the EBA's own search (finals tab)."""
+def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
+    """EBA sectoral (banking) acts via the EBA's own search (finals tab).
+    The listing enumeration is always complete (presence, counts, delisting);
+    detail pages are fetched per _select."""
     params = cfg.get("eba") or {}
     if not params.get("legal_act_ids"):
         return
@@ -191,8 +255,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
         pages = -(-expected.get("final", 0) // _EBA_PER_PAGE)
         max_pages = int(params.get("max_pages", 600))
         print(f"[eba] pre-flight: {expected} → ~{pages} listing pages "
-              f"(max_pages={max_pages}), "
-              f"~{expected.get('final', 0) * http.delay / 60:.0f} min of detail fetches")
+              f"(max_pages={max_pages})")
         if pages > max_pages:
             print(f"[eba] ERROR: {expected.get('final', 0)} finals need ~{pages} "
                   f"listing pages > max_pages={max_pages} — raise eba.max_pages "
@@ -200,25 +263,28 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
             totals["eba"]["errors"] += 1
             complete["eba"] = False
             return
-    n = listed = 0
+    # Recently published finals (the "window") — catches revisions that bump
+    # the publishing date on the day they appear. Best-effort: a broken date
+    # facet only defers those to the verification queue (≤ verify_after_days).
+    win = set()
+    if not mode["sweep"] and not args.limit:
+        try:
+            win = {_slug_from_url(u) for u in eba.list_detail_urls(
+                http, params, published_since=mode["window_start"])}
+        except Exception as exc:
+            print(f"[eba] window listing failed ({exc}) — relying on the "
+                  "verification queue", file=sys.stderr)
+    entries = []
+    listed = 0
     try:
         for url in eba.list_detail_urls(http, params):
             listed += 1
-            if args.limit and n >= args.limit:
+            slug = _slug_from_url(url)
+            seen["eba"].add(f"eba:{slug}")
+            entries.append((f"eba:{slug}", slug in win, url))
+            if args.limit and listed >= args.limit:
                 complete["eba"] = False
                 break
-            n += 1
-            try:
-                rec = eba.fetch_record(http, url).finalize(params)
-                if req and req.lower() not in rec.status.lower():
-                    print(f"[eba] skip {rec.slug()} (status: {rec.status!r})")
-                    continue
-                seen["eba"].add(state.key(rec))
-                _write_delta(root, state, rec, args, totals, "eba", "eba")
-            except Exception as exc:
-                totals["eba"]["errors"] += 1
-                complete["eba"] = False
-                print(f"[eba] ERROR {url}: {exc}", file=sys.stderr)
     except Exception as exc:
         print(f"[eba] LISTING FAILED: {exc}", file=sys.stderr)
         totals["eba"]["errors"] += 1
@@ -231,6 +297,25 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
               "finals — listing incomplete", file=sys.stderr)
         totals["eba"]["errors"] += 1
         complete["eba"] = False
+    n = 0
+    for _, _, url in _select(entries, state, mode):
+        if args.limit and n >= args.limit:
+            complete["eba"] = False
+            break
+        n += 1
+        try:
+            rec = eba.fetch_record(http, url).finalize(params)
+            if req and req.lower() not in rec.status.lower():
+                print(f"[eba] skip {rec.slug()} (status: {rec.status!r})")
+                continue
+            seen["eba"].add(state.key(rec))
+            state.mark_verified(state.key(rec), _now())
+            totals["eba"]["checked"] += 1
+            _write_delta(root, state, rec, args, totals, "eba", "eba")
+        except Exception as exc:
+            totals["eba"]["errors"] += 1
+            complete["eba"] = False
+            print(f"[eba] ERROR {url}: {exc}", file=sys.stderr)
 
 
 def _delist(http, root, state, cfg, args, totals, seen, complete, today):
@@ -294,6 +379,9 @@ def main(argv=None) -> int:
                     help="restrict to one receiving authority (default: all)")
     ap.add_argument("--limit", type=int, default=0, help="max records per source (0 = no limit)")
     ap.add_argument("--full", action="store_true", help="rewrite all records, not only new/changed")
+    ap.add_argument("--sweep", action="store_true",
+                    help="force a full content sweep (otherwise due-driven via "
+                         "incremental.sweep_after_days)")
     ap.add_argument("--allow-mass-delisting", action="store_true",
                     help="permit delisting beyond the plausibility threshold")
     ap.add_argument("--root", default=".", help="repo root (default: cwd)")
@@ -315,29 +403,38 @@ def main(argv=None) -> int:
     today = datetime.now(timezone.utc).date().isoformat()
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
-    totals = {a: {"seen": 0, "written": 0, "archived": 0, "delisted": 0, "errors": 0}
-              for a in ADAPTERS}
+    totals = {a: {"seen": 0, "written": 0, "checked": 0, "archived": 0,
+                  "delisted": 0, "errors": 0} for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
     complete = {a: True for a in ADAPTERS}
+    mode = _run_mode(state, cfg, args)
+    print(f"mode: {'full sweep' if mode['sweep'] else 'incremental'} "
+          f"(last full sweep: {state.data.get('last_full_sweep') or 'never'})")
 
-    _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, complete)
+    _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen,
+                  complete, mode)
     if "eba" in sel:
-        _mirror_eba(http, root, state, cfg, args, totals, seen, complete)
+        _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode)
     else:
         complete["eba"] = False  # EBA sectoral not run → don't delist EBA
     if not args.limit:
         _delist(http, root, state, cfg, args, totals, seen, complete, today)
 
+    ok = not any(t["errors"] for t in totals.values())
+    if (mode["sweep"] and ok and not args.limit and args.authority == "all"):
+        # only a green, unrestricted, all-authorities sweep counts as "the
+        # whole corpus was verified in one pass" — anything less stays due
+        state.data["last_full_sweep"] = today
     state.save()
     print("\nSummary:")
     for auth, t in totals.items():
-        print(f"  {auth}: {t['seen']} seen, {t['written']} written, "
-              f"{t['archived']} archived, {t['delisted']} delisted, "
-              f"{t['errors']} errors")
+        print(f"  {auth}: {t['seen']} seen, {t['checked']} checked, "
+              f"{t['written']} written, {t['archived']} archived, "
+              f"{t['delisted']} delisted, {t['errors']} errors")
     _write_step_summary(totals)
     if not args.limit:
-        _write_run_manifest(root, args, sel, totals)
-    return 1 if any(t["errors"] for t in totals.values()) else 0
+        _write_run_manifest(root, args, sel, totals, mode)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
