@@ -7,7 +7,7 @@ Mirrors the supervisory **Q&As relevant to banking regulation** into one normali
 Two bodies of Q&As matter for a credit institution, and this tool covers both:
 
 - **Joint ESAs Q&As** — cross-sectoral acts answered jointly by EBA/EIOPA/ESMA. **DORA** is the one that binds banks today. These are discovered through the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas), then fetched from whichever authority's webtool received the question.
-- **EBA Single Rulebook Q&As** — the banking-sector acts that live solely at the EBA: **CRD** out of the box, with **CRR / PSD2 / BRRD / MiCAR** a one-line config change.
+- **EBA Single Rulebook Q&As** — the banking-sector acts that live solely at the EBA: **CRD and CRR** out of the box, with **PSD2 / BRRD / MiCAR** a one-line config change.
 
 **Why:** the authorities publish these Q&As as individual web pages made for interactive reading — three webtools, three formats. What's missing is the corpus **as data**: everything in one grip, normalized and machine-readable. These supervisory interpretations materially affect how an article must be read, and having all of them enumerable in one repository makes them not just searchable, diffable and citable, but directly usable as an **LLM-ready knowledge base** — feed `data/` to an AI assistant for retrieval, cross-cutting analysis or drafting support. That is what this mirror provides: one Markdown file per Q&A with uniform frontmatter, kept current via scheduled delta runs. Only **final** Q&As are mirrored.
 
