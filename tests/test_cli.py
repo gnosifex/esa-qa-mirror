@@ -34,13 +34,18 @@ def fetch_for(auth):
     return fetch
 
 
-def install(monkeypatch, rows, eba_listing=None):
+def install(monkeypatch, rows, eba_listing=None, eba_counts=None, eba_archive=None):
     monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
     for auth, mod in (("eiopa", eiopa), ("esma", esma), ("eba", eba)):
         monkeypatch.setattr(mod, "fetch_record", fetch_for(auth))
     if eba_listing is not None:
         monkeypatch.setattr(eba, "list_detail_urls",
                             lambda http, params, **kw: iter(eba_listing))
+    # never let unit tests hit the live count/archive endpoints
+    monkeypatch.setattr(eba, "expected_counts",
+                        lambda http, params: dict(eba_counts or {}))
+    monkeypatch.setattr(eba, "list_archive_slugs",
+                        lambda http, params: set(eba_archive or ()))
 
 
 JOINT_CFG = (
@@ -174,24 +179,101 @@ def test_mass_delisting_brake(root, monkeypatch):
     assert "x_delisted:" in (root / "data" / "dora" / "eiopa-2600.md").read_text()
 
 
-def test_eba_sectoral_alongside_joint(tmp_path, monkeypatch):
-    (tmp_path / "config.yaml").write_text(
-        JOINT_CFG + "eba:\n  legal_act_ids: [32]\n  default_act_ref: '2013/36'\n"
-        "  require_status: Final\n", encoding="utf-8")
-    listing = [f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/2013_9"]
+EBA_CFG = (JOINT_CFG + "eba:\n  legal_act_ids: [32]\n  default_act_ref: '2013/36'\n"
+           "  require_status: Final\n")
 
-    # eba.fetch_record for the sectoral CRD record returns a CRD record
-    def eba_fetch(http, url):
-        return Record(authority="eba", qa_id="2013_9", source_url=url,
-                      status="Final Q&A", legal_act_raw="Directive 2013/36/EU (CRD)",
-                      question="Q", answer="A")
-    install(monkeypatch, default_rows())
-    monkeypatch.setattr(eba, "fetch_record", eba_fetch)
-    monkeypatch.setattr(eba, "list_detail_urls",
-                        lambda http, params, **kw: iter(listing))
+
+def eba_listing(*qa_ids):
+    return [f"{eba.BASE}/single-rule-book-qa/qna/view/publicId/{q}" for q in qa_ids]
+
+
+def eba_fetch_final(http, url):
+    nid = url.rstrip("/").rsplit("/", 1)[-1]
+    return Record(authority="eba", qa_id=nid, source_url=url,
+                  status="Final Q&A", legal_act_raw="Directive 2013/36/EU (CRD)",
+                  question="Q", answer="A")
+
+
+def test_eba_sectoral_alongside_joint(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    install(monkeypatch, default_rows(), eba_listing=eba_listing("2013_9"))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
 
     assert cli.main(["--root", str(tmp_path)]) == 0
     # joint EBA-less run still wrote EIOPA/ESMA joint records...
     assert (tmp_path / "data" / "dora" / "eiopa-2622.md").exists()
     # ...and the sectoral CRD record landed under its own family
     assert (tmp_path / "data" / "crd" / "eba-2013-9.md").exists()
+
+
+def test_eba_missing_records_split_into_archived_and_delisted(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    install(monkeypatch, [], eba_listing=eba_listing("2013_1", "2013_2", "2013_3"))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 0
+    # next pass: 2013_2 moved to the archive tab, 2013_3 vanished entirely
+    install(monkeypatch, [], eba_listing=eba_listing("2013_1"),
+            eba_archive={"2013-2"})
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 0
+    crd = tmp_path / "data" / "crd"
+    assert "x_archived:" in (crd / "eba-2013-2.md").read_text()
+    assert "x_delisted" not in (crd / "eba-2013-2.md").read_text()
+    assert "x_delisted:" in (crd / "eba-2013-3.md").read_text()
+    assert "x_" not in (crd / "eba-2013-1.md").read_text().split("---")[1]
+
+
+def test_eba_archive_lookup_failure_fails_closed(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    install(monkeypatch, [], eba_listing=eba_listing("2013_1", "2013_2"))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 0
+
+    install(monkeypatch, [], eba_listing=eba_listing("2013_1"))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    def boom(http, params):
+        raise RuntimeError("archive tab unreachable")
+    monkeypatch.setattr(eba, "list_archive_slugs", boom)
+    assert cli.main(["--root", str(tmp_path)]) == 1  # red
+    # unable to classify → nothing marked at all
+    assert "x_" not in (tmp_path / "data" / "crd" / "eba-2013-2.md")\
+        .read_text().split("---")[1]
+
+
+def test_eba_preflight_aborts_when_page_budget_too_small(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(EBA_CFG + "  max_pages: 2\n",
+                                          encoding="utf-8")
+    def never(http, params, **kw):
+        raise AssertionError("listing must not be walked when pre-flight fails")
+    install(monkeypatch, default_rows(), eba_counts={"final": 100})
+    monkeypatch.setattr(eba, "list_detail_urls", never)
+    assert cli.main(["--root", str(tmp_path)]) == 1  # 100/20 = 5 pages > 2
+
+
+def test_eba_incomplete_discovery_vs_announced_count_is_error(tmp_path, monkeypatch):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    # portal announces 10 finals, the listing serves only 1 → silent truncation
+    install(monkeypatch, default_rows(), eba_listing=eba_listing("2013_1"),
+            eba_counts={"final": 10})
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 1
+    # the fetched record itself is still written (partial results are kept)
+    assert (tmp_path / "data" / "crd" / "eba-2013-1.md").exists()
+
+
+def test_run_manifest_written_for_full_runs_only(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root) == 0
+    lines = (root / "runs.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 1
+    import json
+    entry = json.loads(lines[0])
+    assert entry["totals"]["eiopa"]["written"] == 2
+    assert len(entry["state_sha256"]) == 64
+    assert entry["ts"]
+    # a --limit smoke run must not pollute the audit trail
+    run(root, "--limit", "1")
+    assert len((root / "runs.jsonl").read_text().strip().splitlines()) == 1
+    # the next full run appends
+    run(root)
+    assert len((root / "runs.jsonl").read_text().strip().splitlines()) == 2

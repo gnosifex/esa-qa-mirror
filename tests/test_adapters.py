@@ -53,6 +53,40 @@ def test_eba_listing_pagination():
     assert urls == [eba.BASE + detail.format(n) for n in (1, 2, 3)]
 
 
+def test_eba_expected_counts_parses_tab_totals():
+    # /qa-search-count answers Drupal AJAX insert commands (verified 2026-07-09)
+    body = ('[{"command":"insert","method":"replaceWith",'
+            '"selector":"#view-count-final","data":"(96)","settings":null},'
+            '{"command":"insert","method":"replaceWith",'
+            '"selector":"#view-count-review","data":"(3)","settings":null},'
+            '{"command":"insert","method":"replaceWith",'
+            '"selector":"#view-count-archive","data":"(115)","settings":null}]')
+    url = f"{eba.BASE}/qa-search-count?qa_legal_act%5B%5D=32"
+    http = FakeHttp({url: body})
+    counts = eba.expected_counts(http, {"legal_act_ids": [32]})
+    assert counts == {"final": 96, "review": 3, "archive": 115}
+    # the endpoint only answers XHR calls — the header must be sent
+    assert http.headers_sent[0].get("X-Requested-With") == "XMLHttpRequest"
+
+
+def test_eba_expected_counts_fails_open():
+    assert eba.expected_counts(FakeHttp({}), {"legal_act_ids": [32]}) == {}
+
+
+def test_eba_archive_slugs():
+    q = "qa_legal_act%5B%5D=32"
+    def page_url(p):
+        return f"{eba.BASE}/single-rule-book-qa/archive?{q}&page={p}"
+    http = FakeHttp({
+        page_url(0): '<a href="/single-rule-book-qa/qna/view/publicId/2017_3613">x</a>'
+                     '<a href="/single-rule-book-qa/qna/view/publicId/2018_3675">y</a>',
+        page_url(1): "<html>empty</html>",
+        page_url(2): "<html>empty</html>",
+    })
+    assert eba.list_archive_slugs(http, {"legal_act_ids": [32]}) == {
+        "2017-3613", "2018-3675"}
+
+
 # --- EIOPA (detail parse for register-discovered joint Q&As) -------------------
 
 def test_eiopa_fetch_record(fixture_html):

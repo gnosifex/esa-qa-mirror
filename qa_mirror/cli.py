@@ -13,6 +13,8 @@ error-free discovery pass are marked delisted (never deleted).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -44,15 +46,31 @@ def _write_step_summary(totals: dict):
     lines = [
         "## Mirror run",
         "",
-        "| authority | seen | written | delisted | errors |",
-        "|---|---:|---:|---:|---:|",
+        "| authority | seen | written | archived | delisted | errors |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
     for auth, t in totals.items():
         lines.append(
-            f"| {auth} | {t['seen']} | {t['written']} | {t['delisted']} | {t['errors']} |"
+            f"| {auth} | {t['seen']} | {t['written']} | {t['archived']} "
+            f"| {t['delisted']} | {t['errors']} |"
         )
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def _write_run_manifest(root: Path, args, sel, totals):
+    """Append one JSON line per completed run to runs.jsonl — the committed,
+    retention-free proof that a run happened even when nothing changed
+    ("checked and unchanged" vs "never ran"). Skipped for --limit smoke runs."""
+    line = {
+        "ts": _now(),
+        "authorities": sorted(sel),
+        "full": bool(args.full),
+        "totals": totals,
+        "state_sha256": hashlib.sha256((root / "state.json").read_bytes()).hexdigest(),
+    }
+    with (root / "runs.jsonl").open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
 def _now():
@@ -133,15 +151,37 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 complete[a] = False
 
 
+_EBA_PER_PAGE = 20  # listing page size of the EBA search (verified 2026-07-09)
+
+
 def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
-    """EBA sectoral (banking) acts via the EBA's own search."""
+    """EBA sectoral (banking) acts via the EBA's own search (finals tab)."""
     params = cfg.get("eba") or {}
     if not params.get("legal_act_ids"):
         return
     req = str(params.get("require_status", "") or "")
-    n = 0
+    # Pre-flight: the portal's own count endpoint says how many finals exist —
+    # the only independent completeness reference a first run has. Checks the
+    # page budget up front (minute 1, not minute 50) and the discovery at the
+    # end. Best-effort: an unavailable endpoint never blocks the run.
+    expected = eba.expected_counts(http, params)
+    if expected:
+        pages = -(-expected.get("final", 0) // _EBA_PER_PAGE)
+        max_pages = int(params.get("max_pages", 600))
+        print(f"[eba] pre-flight: {expected} → ~{pages} listing pages "
+              f"(max_pages={max_pages}), "
+              f"~{expected.get('final', 0) * http.delay / 60:.0f} min of detail fetches")
+        if pages > max_pages:
+            print(f"[eba] ERROR: {expected.get('final', 0)} finals need ~{pages} "
+                  f"listing pages > max_pages={max_pages} — raise eba.max_pages "
+                  "in config.yaml", file=sys.stderr)
+            totals["eba"]["errors"] += 1
+            complete["eba"] = False
+            return
+    n = listed = 0
     try:
         for url in eba.list_detail_urls(http, params):
+            listed += 1
             if args.limit and n >= args.limit:
                 complete["eba"] = False
                 break
@@ -161,12 +201,24 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete):
         print(f"[eba] LISTING FAILED: {exc}", file=sys.stderr)
         totals["eba"]["errors"] += 1
         complete["eba"] = False
+        return
+    # A materially smaller discovery than announced means silent truncation
+    # (stale cache nodes, broken pager) — fail closed rather than delist.
+    if expected.get("final") and not args.limit and listed < expected["final"] * 0.95:
+        print(f"[eba] ERROR: discovered {listed} of {expected['final']} announced "
+              "finals — listing incomplete", file=sys.stderr)
+        totals["eba"]["errors"] += 1
+        complete["eba"] = False
 
 
-def _delist(root, state, args, totals, seen, complete, today):
+def _delist(http, root, state, cfg, args, totals, seen, complete, today):
     """Mark records of an authority that vanished from a complete, error-free
     discovery pass — never delete (a citation tool must not silently lose
-    records). A plausibility brake refuses mass delisting (a broken source)."""
+    records). Missing EBA records are first resolved against the portal's
+    archive tab: *archived after a review* (x_archived) is a different state
+    than *vanished without trace* (x_delisted). A plausibility brake refuses
+    mass delisting (a broken source); archive hits are positive evidence from
+    the portal itself and bypass the brake."""
     for auth in ADAPTERS:
         if not complete[auth] or totals[auth]["errors"]:
             continue
@@ -175,17 +227,38 @@ def _delist(root, state, args, totals, seen, complete, today):
             if k.startswith(f"{auth}:") and not h.startswith(common.DELISTED_HASH_PREFIX)
         ]
         missing = [k for k in known if k not in seen[auth]]
+        if not missing:
+            continue
+        archived = set()
+        if auth == "eba" and (cfg.get("eba") or {}).get("legal_act_ids"):
+            try:
+                slugs = eba.list_archive_slugs(http, cfg["eba"])
+                archived = {k for k in missing if k.split(":", 1)[1] in slugs}
+            except Exception as exc:
+                # Unresolvable archive → cannot classify the missing records;
+                # fail closed for this authority instead of guessing.
+                print(f"[eba] ARCHIVE LOOKUP FAILED: {exc} — delisting skipped",
+                      file=sys.stderr)
+                totals[auth]["errors"] += 1
+                continue
+        for key in sorted(archived):
+            path = common.mark_file_gone(root, key, today, "archived")
+            if path:
+                state.mark_delisted(key)  # same state marker: gone from finals
+                totals[auth]["archived"] += 1
+                print(f"[{auth}] archived {key} → marked {path.relative_to(root)}")
+        rest = [k for k in missing if k not in archived]
         threshold = max(5, len(known) // 5)
-        if len(missing) > threshold and not args.allow_mass_delisting:
+        if len(rest) > threshold and not args.allow_mass_delisting:
             print(
-                f"[{auth}] ERROR: implausible discovery — {len(missing)} of "
+                f"[{auth}] ERROR: implausible discovery — {len(rest)} of "
                 f"{len(known)} known records missing; delisting skipped. "
                 "Check the source; --allow-mass-delisting overrides.",
                 file=sys.stderr,
             )
             totals[auth]["errors"] += 1
             continue
-        for key in missing:
+        for key in rest:
             path = common.mark_file_delisted(root, key, today)
             if path:
                 state.mark_delisted(key)
@@ -220,7 +293,8 @@ def main(argv=None) -> int:
     today = datetime.now(timezone.utc).date().isoformat()
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
-    totals = {a: {"seen": 0, "written": 0, "delisted": 0, "errors": 0} for a in ADAPTERS}
+    totals = {a: {"seen": 0, "written": 0, "archived": 0, "delisted": 0, "errors": 0}
+              for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
     complete = {a: True for a in ADAPTERS}
 
@@ -230,14 +304,17 @@ def main(argv=None) -> int:
     else:
         complete["eba"] = False  # EBA sectoral not run → don't delist EBA
     if not args.limit:
-        _delist(root, state, args, totals, seen, complete, today)
+        _delist(http, root, state, cfg, args, totals, seen, complete, today)
 
     state.save()
     print("\nSummary:")
     for auth, t in totals.items():
         print(f"  {auth}: {t['seen']} seen, {t['written']} written, "
-              f"{t['delisted']} delisted, {t['errors']} errors")
+              f"{t['archived']} archived, {t['delisted']} delisted, "
+              f"{t['errors']} errors")
     _write_step_summary(totals)
+    if not args.limit:
+        _write_run_manifest(root, args, sel, totals)
     return 1 if any(t["errors"] for t in totals.values()) else 0
 
 

@@ -2,6 +2,7 @@ import pytest
 
 from qa_mirror.common import (
     DELISTED_HASH_PREFIX,
+    ListingTruncated,
     Record,
     State,
     format_joint_id,
@@ -9,6 +10,7 @@ from qa_mirror.common import (
     iso_date,
     iter_listing,
     mark_file_delisted,
+    mark_file_gone,
     record_path,
     write_record,
 )
@@ -156,6 +158,24 @@ def test_mark_file_delisted(tmp_path):
     assert path.read_text(encoding="utf-8").count("x_delisted") == 1
 
 
+def test_mark_file_gone_archived_and_mutual_exclusion(tmp_path):
+    rec = make_record()
+    path = write_record(tmp_path, rec)
+    state = State(tmp_path / "state.json")
+    assert mark_file_gone(tmp_path, state.key(rec), "2026-07-09", "archived") == path
+    text = path.read_text(encoding="utf-8")
+    assert 'x_archived: "2026-07-09"\nsource_url:' in text
+    # a record already marked archived must not also get delisted (and vice versa)
+    assert mark_file_delisted(tmp_path, state.key(rec), "2026-07-10") is None
+    assert "x_delisted" not in path.read_text(encoding="utf-8")
+
+
+def test_disclaimer_carries_point_in_time_caveat():
+    # Q&As speak as of publication; the authorities do not re-review after
+    # later changes to the legal acts — every record must say so.
+    assert "speak as of their publication date" in make_record().to_markdown()
+
+
 # --- Http retries -------------------------------------------------------------
 
 class _Resp:
@@ -215,6 +235,12 @@ def page(*ids):
     return " ".join(LINK.format(i) for i in ids)
 
 
+def plain_calls(http):
+    # cache-busted retries of barren pages are best-effort extras — the page
+    # walk itself is what these tests assert
+    return [c for c in http.calls if "cachebust" not in str(c)]
+
+
 def test_iter_listing_survives_one_stale_page():
     http = FakeHttp({0: page("a", "b"), 1: page("a"), 2: page("c"), 3: "", 4: ""})
     got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
@@ -225,7 +251,7 @@ def test_iter_listing_stops_after_two_stale_pages():
     http = FakeHttp({0: page("a"), 1: page("a"), 2: page("a"), 3: page("b")})
     got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
     assert got == ["/qa/a"]
-    assert http.calls == [0, 1, 2]
+    assert plain_calls(http) == [0, 1, 2]
 
 
 def test_iter_listing_survives_one_empty_page():
@@ -235,11 +261,27 @@ def test_iter_listing_survives_one_empty_page():
                      3: "", 4: ""})
     got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
     assert got == ["/qa/a", "/qa/b"]
-    assert http.calls == [0, 1, 2, 3, 4]
+    assert plain_calls(http) == [0, 1, 2, 3, 4]
 
 
-def test_iter_listing_warns_when_max_pages_reached(capsys):
+def test_iter_listing_cache_busted_retry_rescues_shell_page(monkeypatch):
+    # A barren page that is really a stale cache node serving the JS shell:
+    # the cache-busted retry of the same page must recover the links.
+    import qa_mirror.common as common
+    monkeypatch.setattr(common.time, "time", lambda: 42)
+    http = FakeHttp({0: page("a"), 1: "<html>shell</html>",
+                     "1?cachebust=42": page("b"), 2: page("c"),
+                     3: "", 4: ""})
+    got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 10, "t"))
+    assert got == ["/qa/a", "/qa/b", "/qa/c"]
+
+
+def test_iter_listing_raises_when_max_pages_exhausted():
+    # Exhausting the page budget means possible truncation — that must fail
+    # closed (red run, no delisting), not end quietly like a complete pass.
     http = FakeHttp({0: page("a"), 1: page("b")})
-    got = list(iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 2, "t"))
+    got = []
+    with pytest.raises(ListingTruncated):
+        for u in iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 2, "t"):
+            got.append(u)
     assert got == ["/qa/a", "/qa/b"]
-    assert "max_pages=2" in capsys.readouterr().err
