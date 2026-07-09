@@ -51,6 +51,29 @@ jobs:
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
+      - name: EBA listing via adapter — single vs multi act (does [32,33] discover?)
+        run: |
+          python3 - <<'PY'
+          from itertools import islice
+          from qa_mirror.common import Http
+          from qa_mirror import eba
+          http = Http(delay=1.0)
+          for ids in ([32], [32, 33]):
+              urls = list(islice(eba.list_detail_urls(http, {"legal_act_ids": ids}), 45))
+              print(f"acts {ids}: {len(urls)} urls from first pages; first 3:", urls[:3])
+          PY
+      - name: Register status values — distinct, with counts (Revised handling)
+        run: |
+          python3 - <<'PY'
+          from collections import Counter
+          from qa_mirror import register
+          rows = register.fetch_rows()
+          print("total rows:", len(rows))
+          print("status values, all acts:", Counter(r["status"] for r in rows))
+          dora = [r for r in rows if "DORA" in (r["legal_act_raw"] or "")]
+          print("DORA rows:", len(dora),
+                "status values:", Counter(r["status"] for r in dora))
+          PY
 
   # Raw looks at what the portals serve this runner.
   probe:
@@ -130,3 +153,119 @@ jobs:
           grep -o 'href="/publications-data/questions-answers/[0-9]*"' page.html | sort -u | head -15 || echo "NONE"
           echo "pager pages advertised:"
           grep -oE '[?&;]page=[0-9]+' page.html | sort -u | head -8 || echo "none"
+      - name: EBA search listing — result count, per-page size, pager, facets
+        run: |
+          url="https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32&qa_legal_act%5B%5D=33"
+          curl -sS -A "$UA" "$url" -o s0.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          echo "== detail links on page 0:"
+          grep -o 'href="/single-rule-book-qa/qna/view/publicId/[^"]*"' s0.html | sort -u | wc -l
+          echo "== candidate result-count markup (text nodes with a number >= 2 digits):"
+          grep -oiE '[^<>]*\b[0-9]{2,}\b[^<>]*' s0.html | grep -viE 'px|width|height|20[0-9][0-9]-|\.js|\.css' | head -15
+          echo "== headings/summary elements:"
+          grep -oiE '<(h[1-6]|div|span|p)[^>]*(count|result|total|summary)[^>]*>[^<]*' s0.html | head -10
+          echo "== pager links (highest page numbers advertised):"
+          grep -oE '[?&;]page=[0-9]+' s0.html | grep -oE '[0-9]+' | sort -n -u | tail -5
+          echo "== form facet fields (server-side filter candidates, e.g. a status facet):"
+          grep -oE '<(input|select)[^>]*name="[^"]*"' s0.html | grep -oE 'name="[^"]*"' | sort -u
+          echo "== select options (facet values):"
+          grep -oE '<option[^>]*value="[^"]*"[^>]*>[^<]*' s0.html | head -30
+          echo "== page 1 (per-page size cross-check):"
+          curl -sS -A "$UA" "$url&page=1" -o s1.html -w "HTTP %{http_code}\n"
+          grep -o 'href="/single-rule-book-qa/qna/view/publicId/[^"]*"' s1.html | sort -u | wc -l
+      - name: EBA archive listing — path, links, pager (x_archived resolution)
+        run: |
+          for u in "https://www.eba.europa.eu/single-rule-book-qa/archive" \
+                   "https://www.eba.europa.eu/single-rule-book-qa/archive?page=1"; do
+            echo "=== $u"
+            curl -sS -A "$UA" -L "$u" -o a.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+            echo "-- detail links (count, first 5):"
+            grep -o 'href="/single-rule-book-qa/qna/view/publicId/[^"]*"' a.html | sort -u | wc -l
+            grep -o 'href="/single-rule-book-qa/qna/view/publicId/[^"]*"' a.html | sort -u | head -5 || true
+            echo "-- candidate count markup:"
+            grep -oiE '[^<>]*\b[0-9]{2,}\b[^<>]*(archive|result|q&amp;a)[^<>]*|[^<>]*(archive|result)[^<>]*\b[0-9]{2,}\b[^<>]*' a.html | head -5 || true
+            echo "-- pager:"
+            grep -oE '[?&;]page=[0-9]+' a.html | sort -u | tail -3 || true
+            echo "-- facet fields:"
+            grep -oE '<(input|select)[^>]*name="[^"]*"' a.html | grep -oE 'name="[^"]*"' | sort -u | head -10 || true
+          done
+      - name: EBA qa-search-count endpoint (pre-flight totals) + tab/pager anatomy
+        run: |
+          for q in "qa_legal_act%5B%5D=32" "qa_legal_act%5B%5D=32&qa_legal_act%5B%5D=33" ""; do
+            echo "=== /qa-search-count?$q"
+            curl -sS -A "$UA" "https://www.eba.europa.eu/qa-search-count?$q" -w "\nHTTP %{http_code}\n" | head -c 800
+            echo ""
+          done
+          echo "=== search page 0, SINGLE act 32 (does server-side rendering depend on act count?):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32" -o s0b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' s0b.html || true
+          echo "=== search page 1, single act 32:"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32&page=1" -o s1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' s1b.html || true
+          echo "=== status-tab links visible on the search page:"
+          grep -oE 'href="[^"]*single-rule-book-qa[^"]*"' s0b.html | grep -v publicId | sort -u | head -10 || true
+          echo "=== archive pager raw hrefs (full attributes, page 0):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/archive" -o a0.html -w "HTTP %{http_code}\n"
+          grep -oE 'href="[^"]*page=[0-9]+[^"]*"' a0.html | sort -u | head -10 || true
+          echo "=== archive page=1 retry (cache-bust):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/archive?page=1&cb=$RANDOM" -o a1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' a1b.html || true
+      - name: EBA AJAX listing — drupalSettings ajaxViews, views/ajax POST, count endpoint
+        run: |
+          pip install --quiet requests
+          python3 - <<'PY'
+          import json, re, requests
+          UA = {"User-Agent": "esa-qa-mirror/0.1 (+https://github.com/gnosifex/esa-qa-mirror; probe)"}
+          s = requests.Session()
+          base = "https://www.eba.europa.eu"
+
+          # flakiness measurement: how often is the listing server-rendered?
+          for i in range(4):
+              r = s.get(f"{base}/single-rule-book-qa/search",
+                        params={"qa_legal_act[]": "32", "cb": i}, headers=UA, timeout=30)
+              n = len(re.findall(r"qna/view/publicId", r.text))
+              print(f"plain fetch {i}: HTTP {r.status_code}, publicId hits: {n}")
+
+          # the All tab — server-rendered?
+          r = s.get(f"{base}/single-rule-book-qa/all", params={"qa_legal_act[0]": "32"},
+                    headers=UA, timeout=30)
+          print("all-tab: HTTP", r.status_code, "publicId hits:",
+                len(re.findall(r"qna/view/publicId", r.text)))
+
+          # extract drupalSettings from the search page
+          r = s.get(f"{base}/single-rule-book-qa/search",
+                    params={"qa_legal_act[]": "32"}, headers=UA, timeout=30)
+          m = re.search(r'data-drupal-selector="drupal-settings-json">(.*?)</script>',
+                        r.text, re.S)
+          if not m:
+              print("NO drupalSettings found"); raise SystemExit(0)
+          cfg = json.loads(m.group(1))
+          views = (cfg.get("views") or {}).get("ajaxViews") or {}
+          print("ajaxViews instances:", len(views))
+          for k, v in views.items():
+              print(" ", k, json.dumps(v)[:400])
+          print("eba_qa settings:", json.dumps(cfg.get("eba_qa", {}))[:300])
+
+          # try the views/ajax POST the frontend pager uses
+          for k, v in list(views.items())[:1]:
+              data = {
+                  "view_name": v.get("view_name"),
+                  "view_display_id": v.get("view_display_id"),
+                  "view_args": v.get("view_args", ""),
+                  "view_path": v.get("view_path", ""),
+                  "view_base_path": v.get("view_base_path", ""),
+                  "view_dom_id": v.get("view_dom_id", ""),
+                  "pager_element": v.get("pager_element", 0),
+                  "page": 1,
+                  "qa_legal_act[]": "32",
+              }
+              r = s.post(f"{base}/views/ajax", data=data, headers={
+                  **UA, "X-Requested-With": "XMLHttpRequest"}, timeout=30)
+              print("views/ajax POST:", r.status_code, "publicId hits:",
+                    len(re.findall(r"qna/view/publicId", r.text)))
+              print("  body head:", r.text[:300].replace("\n", " "))
+
+          # count endpoint, as the frontend calls it (XHR header)
+          r = s.get(f"{base}/qa-search-count", params={"qa_legal_act[]": "32"},
+                    headers={**UA, "X-Requested-With": "XMLHttpRequest"}, timeout=30)
+          print("qa-search-count XHR:", r.status_code, "body:", r.text[:400].replace("\n", " "))
+          PY
