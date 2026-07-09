@@ -51,6 +51,17 @@ jobs:
       - run: python -m qa_mirror --authority esma --limit 5
       - run: python -m qa_mirror --authority eiopa --limit 5
       - run: python -m qa_mirror --authority eba --limit 5
+      - name: EBA listing via adapter — single vs multi act (does [32,33] discover?)
+        run: |
+          python3 - <<'PY'
+          from itertools import islice
+          from qa_mirror.common import Http
+          from qa_mirror import eba
+          http = Http(delay=1.0)
+          for ids in ([32], [32, 33]):
+              urls = list(islice(eba.list_detail_urls(http, {"legal_act_ids": ids}), 45))
+              print(f"acts {ids}: {len(urls)} urls from first pages; first 3:", urls[:3])
+          PY
       - name: Register status values — distinct, with counts (Revised handling)
         run: |
           python3 - <<'PY'
@@ -177,3 +188,24 @@ jobs:
             echo "-- facet fields:"
             grep -oE '<(input|select)[^>]*name="[^"]*"' a.html | grep -oE 'name="[^"]*"' | sort -u | head -10 || true
           done
+      - name: EBA qa-search-count endpoint (pre-flight totals) + tab/pager anatomy
+        run: |
+          for q in "qa_legal_act%5B%5D=32" "qa_legal_act%5B%5D=32&qa_legal_act%5B%5D=33" ""; do
+            echo "=== /qa-search-count?$q"
+            curl -sS -A "$UA" "https://www.eba.europa.eu/qa-search-count?$q" -w "\nHTTP %{http_code}\n" | head -c 800
+            echo ""
+          done
+          echo "=== search page 0, SINGLE act 32 (does server-side rendering depend on act count?):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32" -o s0b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' s0b.html || true
+          echo "=== search page 1, single act 32:"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act%5B%5D=32&page=1" -o s1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' s1b.html || true
+          echo "=== status-tab links visible on the search page:"
+          grep -oE 'href="[^"]*single-rule-book-qa[^"]*"' s0b.html | grep -v publicId | sort -u | head -10 || true
+          echo "=== archive pager raw hrefs (full attributes, page 0):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/archive" -o a0.html -w "HTTP %{http_code}\n"
+          grep -oE 'href="[^"]*page=[0-9]+[^"]*"' a0.html | sort -u | head -10 || true
+          echo "=== archive page=1 retry (cache-bust):"
+          curl -sS -A "$UA" "https://www.eba.europa.eu/single-rule-book-qa/archive?page=1&cb=$RANDOM" -o a1b.html -w "HTTP %{http_code}, %{size_download} bytes\n"
+          grep -c 'single-rule-book-qa/qna/view/publicId' a1b.html || true
