@@ -1,13 +1,20 @@
 """EBA Single Rulebook Q&A adapter.
 
 Listing:  https://www.eba.europa.eu/single-rule-book-qa/search?qa_legal_act[]=<id>&page=N
+          /search is the *finals* tab; the status tabs are sibling paths
+          (/under-review, /rejected, /archive, /all — verified 2026-07-09).
+Counts:   /qa-search-count?<same facets> answers the per-tab totals as Drupal
+          AJAX commands when called with X-Requested-With: XMLHttpRequest —
+          the pre-flight completeness reference for a run.
 Detail:   https://www.eba.europa.eu/single-rule-book-qa/qna/view/publicId/<YYYY_NNNN>
 Detail markup: <dl class="metadata"> with <dt> label / <dd> value pairs
 (Question ID, Legal act, Topic, Article, Question, Answer, Status, dates, ...).
 """
 from __future__ import annotations
 
+import json
 import re
+import sys
 
 from .common import Http, Record, html_to_text, iter_listing, soup
 
@@ -29,17 +36,68 @@ KNOWN_LABELS = {
 EXCLUDED_LABEL_PARTS = ("submitter", "name of institution", "country of incorporation")
 
 
-def list_detail_urls(http: Http, params: dict, max_pages: int = 200):
-    """Yield detail URLs for the configured legal-act filter, all pages."""
-    q = "&".join(f"qa_legal_act%5B%5D={a}" for a in params.get("legal_act_ids", []))
+_DETAIL_HREF_RE = r'href="(/single-rule-book-qa/qna/view/publicId/[^"]+)"'
+_COUNT_RE = re.compile(r"#view-count-(\w+)")
+
+
+def _act_query(params: dict) -> str:
+    return "&".join(f"qa_legal_act%5B%5D={a}" for a in params.get("legal_act_ids", []))
+
+
+def list_detail_urls(http: Http, params: dict, max_pages: int = 0):
+    """Yield detail URLs for the configured legal-act filter, all pages.
+    /search lists final Q&As only (the other statuses live on sibling tabs)."""
+    q = _act_query(params)
     for link in iter_listing(
         http,
         lambda page: f"{BASE}/single-rule-book-qa/search?{q}&page={page}",
-        r'href="(/single-rule-book-qa/qna/view/publicId/[^"]+)"',
-        max_pages,
+        _DETAIL_HREF_RE,
+        max_pages or int(params.get("max_pages", 600)),
         "eba",
     ):
         yield BASE + link
+
+
+def list_archive_slugs(http: Http, params: dict) -> set[str]:
+    """Record slugs (e.g. "2017-3613") currently on the archive tab for the
+    configured acts — Q&As the EBA moved there after a review. Used to tell
+    *archived* apart from *vanished without trace* when a record disappears
+    from the finals listing."""
+    q = _act_query(params)
+    slugs = set()
+    for link in iter_listing(
+        http,
+        lambda page: f"{BASE}/single-rule-book-qa/archive?{q}&page={page}",
+        _DETAIL_HREF_RE,
+        int(params.get("max_pages", 600)),
+        "eba-archive",
+    ):
+        qa_id = link.rstrip("/").rsplit("/", 1)[-1]
+        slugs.add(re.sub(r"[^A-Za-z0-9]+", "-", qa_id).strip("-").lower())
+    return slugs
+
+
+def expected_counts(http: Http, params: dict) -> dict[str, int]:
+    """Per-status-tab totals for the configured acts, from the portal's own
+    count endpoint — e.g. {"final": 96, "review": 3, "rejected": 71,
+    "archive": 115}. Empty dict when the endpoint is unavailable or changes
+    shape (callers must treat the pre-flight as best-effort, never fatal)."""
+    try:
+        resp = http.get(
+            f"{BASE}/qa-search-count?{_act_query(params)}",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        )
+        counts = {}
+        for cmd in json.loads(resp.text):
+            m = _COUNT_RE.search(str(cmd.get("selector", "")))
+            n = re.search(r"\d+", str(cmd.get("data", "")))
+            if m and n:
+                counts[m.group(1)] = int(n.group(0))
+        return counts
+    except Exception as exc:  # fail open: the check must not break the run
+        print(f"[eba] count endpoint unavailable ({exc}) — continuing without",
+              file=sys.stderr)
+        return {}
 
 
 def fetch_record(http: Http, url: str) -> Record:

@@ -2,7 +2,8 @@ name: mirror
 
 on:
   schedule:
-    - cron: "17 5 * * 1"   # Mondays 05:17 UTC
+    - cron: "17 4 * * *"   # daily 04:17 UTC — the run is idempotent, and a
+                             # daily delta caps worst-case latency at ~1 day
   workflow_dispatch: {}
 
 permissions:
@@ -19,7 +20,7 @@ concurrency:
 jobs:
   mirror:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300   # a full CRR-scale first run needs ~1h; generous headroom
     steps:
       # Pinned to full commit SHAs (repo setting "Require actions to be pinned
       # to a full-length commit SHA"). Update SHAs deliberately when bumping.
@@ -40,7 +41,7 @@ jobs:
         run: |
           git config user.name "esa-qa-mirror bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data state.json
+          git add data state.json runs.jsonl
           git diff --cached --quiet && echo "no changes" && exit 0
           git commit -m "mirror: $(date -u +%F) delta"
           git pull --rebase origin "${GITHUB_REF_NAME}"

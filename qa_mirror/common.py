@@ -104,6 +104,11 @@ def html_to_text(node) -> str:
     return "\n\n".join(parts)
 
 
+class ListingTruncated(RuntimeError):
+    """A paginated listing hit max_pages before running dry — the discovery is
+    incomplete and must not be used as a basis for delisting."""
+
+
 def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
     """Yield detail-page links from a 0-based paginated listing, in page order.
 
@@ -111,8 +116,8 @@ def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
     — whether it carries no links at all (a transient empty response mid-listing)
     or only already-seen ones (pinned/duplicate entries) — must not silently cut
     off the rest of the corpus, so both cases are treated the same and only a
-    second consecutive one ends the walk. Warns when max_pages is exhausted,
-    since that also means possible truncation.
+    second consecutive one ends the walk. Raises ListingTruncated when max_pages
+    is exhausted: a truncated pass must fail closed, not look complete.
     """
     seen = set()
     stale = 0
@@ -121,6 +126,18 @@ def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
         links = set(re.findall(href_re, html))
         new = links - seen
         if not new:
+            # Portals intermittently serve the listing as a JS-only shell from
+            # a stale cache node (EBA seen live 2026-07-09; EIOPA/ESMA during
+            # their 2026-07 migrations). One cache-busted retry distinguishes
+            # an exhausted listing from a bad cache hit.
+            url = str(page_url(page))
+            bust = f"{'&' if '?' in url else '?'}cachebust={int(time.time())}"
+            try:
+                links = set(re.findall(href_re, http.get(url + bust).text))
+                new = links - seen
+            except Exception:
+                pass  # the retry is best-effort; the stale counter decides
+        if not new:
             stale += 1
             if stale >= 2:
                 return
@@ -128,10 +145,8 @@ def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
         stale = 0
         seen |= new
         yield from sorted(new)
-    print(
-        f"[{tag}] WARNING: pagination stopped at max_pages={max_pages} — "
-        "listing may be truncated",
-        file=sys.stderr,
+    raise ListingTruncated(
+        f"[{tag}] pagination exhausted max_pages={max_pages} — listing truncated"
     )
 
 
@@ -291,7 +306,11 @@ class Record:
             "",
             "> **Disclaimer.** Unofficial, automatically generated mirror copy — "
             "no guarantee and no liability is accepted for accuracy, completeness "
-            "or timeliness; conversion errors are possible. Before any use or "
+            "or timeliness; conversion errors are possible. Q&A answers speak as "
+            "of their publication date: they refer to the legal acts in force at "
+            "that time, and the authorities do not systematically revisit "
+            "published Q&As after subsequent changes to the underlying "
+            "legislation. Before any use or "
             f"reliance, verify against the original: <{self.source_url}> — "
             "the authority's portal version prevails. Content © the respective "
             "authority; reuse subject to its legal notice.",
@@ -359,21 +378,23 @@ def write_record(root: Path, rec: Record) -> Path:
     return out
 
 
-def mark_file_delisted(root: Path, key: str, date_iso: str) -> Path | None:
-    """Flag the record file for state key "authority:slug" as no longer listed.
+def mark_file_gone(root: Path, key: str, date_iso: str, field: str) -> Path | None:
+    """Flag the record file for state key "authority:slug" as gone from the
+    active listing — `field` says how: "delisted" (vanished without trace) or
+    "archived" (moved to the authority's archive after a review).
 
     The file is kept (a citation tool must not silently lose records) and gets
-    an `x_delisted: "YYYY-MM-DD"` frontmatter field instead. Returns the file
+    an `x_<field>: "YYYY-MM-DD"` frontmatter field instead. Returns the file
     path if it was newly marked, None if already marked or not found.
     """
     authority, slug = key.split(":", 1)
     for f in sorted((root / "data").glob(f"*/{authority}-{slug}.md")):
         text = f.read_text(encoding="utf-8")
-        if re.search(r"^x_delisted: ", text, flags=re.M):
+        if re.search(r"^x_(delisted|archived): ", text, flags=re.M):
             return None
         new = re.sub(
             r"^source_url: ",
-            f'x_delisted: "{date_iso}"\nsource_url: ',
+            f'x_{field}: "{date_iso}"\nsource_url: ',
             text,
             count=1,
             flags=re.M,
@@ -383,3 +404,7 @@ def mark_file_delisted(root: Path, key: str, date_iso: str) -> Path | None:
         f.write_text(new, encoding="utf-8")
         return f
     return None
+
+
+def mark_file_delisted(root: Path, key: str, date_iso: str) -> Path | None:
+    return mark_file_gone(root, key, date_iso, "delisted")

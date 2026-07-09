@@ -15,6 +15,15 @@ from pathlib import Path
 
 import yaml
 
+_ART_PREFIX_RE = re.compile(r"^\s*art(?:icle|\.)?\s+", re.I)
+
+
+def _article(v) -> str:
+    """Display form of the article field: some portals store 'Article 28'
+    verbatim and the search page prefixes 'Art.' itself; 'N/A' says nothing."""
+    v = _ART_PREFIX_RE.sub("", str(v or "")).strip()
+    return "" if v.lower() in ("n/a", "na", "none", "-") else v
+
 # First ---…--- pair only: a "---" inside the body (ESMA answers separate
 # accordion parts with it) must not shift the frontmatter boundary.
 _FM_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.S)
@@ -42,7 +51,7 @@ def build(root: Path) -> int:
             "qa_id": fm.get("qa_id", ""),
             "joint_id": fm.get("joint_id", ""),
             "legal_act": fm.get("legal_act", ""),
-            "article": fm.get("article", ""),
+            "article": _article(fm.get("article", "")),
             "topic": fm.get("topic", ""),
             "status": fm.get("status", ""),
             # Publication date of the final answer (ISO, for display + newest-
@@ -53,6 +62,7 @@ def build(root: Path) -> int:
             or fm.get("date_submission_date_iso")
             or "",
             "delisted": fm.get("x_delisted", ""),
+            "archived": fm.get("x_archived", ""),
             "source_url": fm.get("source_url", ""),
             "file": str(f.relative_to(root)),
             "question": (q.group(1).strip() if q else ""),

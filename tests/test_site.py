@@ -1,7 +1,9 @@
 import json
 
 from qa_mirror import site
-from qa_mirror.common import Record, State, mark_file_delisted, write_record
+from qa_mirror.common import (
+    Record, State, mark_file_delisted, mark_file_gone, write_record,
+)
 
 
 def rec(authority, qa_id, legal_act, **kw):
@@ -63,3 +65,27 @@ def test_build_exposes_delisted_flag(tmp_path):
     site.build(tmp_path)
     (out,) = json.loads((tmp_path / "docs" / "records-dora.json").read_text("utf-8"))
     assert out["delisted"] == "2026-07-08"
+    assert out["archived"] == ""
+
+
+def test_build_exposes_archived_flag(tmp_path):
+    r = rec("eba", "2024_9", "DORA")
+    write_record(tmp_path, r)
+    mark_file_gone(tmp_path, State(tmp_path / "state.json").key(r),
+                   "2026-07-09", "archived")
+    site.build(tmp_path)
+    (out,) = json.loads((tmp_path / "docs" / "records-dora.json").read_text("utf-8"))
+    assert out["archived"] == "2026-07-09"
+    assert out["delisted"] == ""
+
+
+def test_build_normalizes_article_for_display(tmp_path):
+    # some portals store "Article 28" verbatim (the page prefixes "Art." itself)
+    # and "N/A" says nothing — both must not reach the index as-is
+    write_record(tmp_path, rec("eba", "1", "DORA", article="Article 28"))
+    write_record(tmp_path, rec("eba", "2", "DORA", article="N/A"))
+    write_record(tmp_path, rec("eba", "3", "DORA", article="28"))
+    site.build(tmp_path)
+    dora = json.loads((tmp_path / "docs" / "records-dora.json").read_text("utf-8"))
+    by_id = {r["qa_id"]: r["article"] for r in dora}
+    assert by_id == {"1": "28", "2": "", "3": "28"}

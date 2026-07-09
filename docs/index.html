@@ -16,6 +16,15 @@
   .controls { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
   input[type=search] { flex:1 1 260px; padding:.55rem .8rem; font-size:1rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
   select { padding:.55rem .5rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); }
+  input[type=date] { padding:.5rem .5rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--fg); font-size:.9rem; }
+  .dd { position:relative; }
+  .dd summary { list-style:none; cursor:pointer; padding:.55rem .8rem; border:1px solid var(--border); border-radius:8px; background:var(--bg); user-select:none; white-space:nowrap; }
+  .dd summary::-webkit-details-marker { display:none; }
+  .dd summary::after { content:" ▾"; color:var(--muted); }
+  .dd[open] summary { border-color:var(--accent); }
+  .ddopts { position:absolute; z-index:10; top:calc(100% + 4px); left:0; min-width:230px; max-height:280px; overflow:auto; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:.45rem .7rem; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+  .ddopts label { display:block; font-size:.9rem; padding:.18rem 0; cursor:pointer; white-space:nowrap; }
+  .ddopts input { margin-right:.4rem; }
   .count { color:var(--muted); font-size:.86rem; margin:.3rem 0 .8rem; }
   .hint { color:var(--muted); font-size:.76rem; margin:-.4rem 0 .8rem; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding: .9rem 1rem; margin-bottom:.8rem; }
@@ -34,7 +43,7 @@
 </head>
 <body>
 <h1>ESA Q&amp;A Search</h1>
-<div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD; weekly refresh) —
+<div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD; daily refresh) —
 <a href="https://github.com/gnosifex/esa-qa-mirror">source &amp; docs on GitHub</a>. No account needed.</div>
 <div class="notice"><b>Disclaimer — unofficial mirror, no guarantee, no liability</b> for accuracy, completeness or timeliness;
 conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
@@ -42,10 +51,12 @@ the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
   <input id="q" type="search" placeholder='Search questions &amp; answers… e.g. "register of information" OR subcontracting' autofocus
     autocorrect="off" autocapitalize="off" spellcheck="false">
-  <select id="act"><option value="">All acts</option></select>
+  <details class="dd" id="actdd"><summary id="actsum">All acts</summary><div class="ddopts" id="actopts"></div></details>
   <select id="auth"><option value="">All authorities</option></select>
+  <input id="from" type="date" title="published from (final publishing date)">
+  <input id="to" type="date" title="published until (final publishing date)">
 </div>
-<div class="hint">words match at word start (<i>art. 28</i> finds Article&nbsp;28) · <i>"…"</i> exact phrase · <i>OR</i>&thinsp;/&thinsp;<i>AND</i> · <i>/…/</i> regex · newest first</div>
+<div class="hint">words match at word start (<i>art. 28</i> finds Article&nbsp;28) · <i>"…"</i> exact phrase · <i>OR</i>&thinsp;/&thinsp;<i>AND</i> · <i>/…/</i> regex · newest first · date range = final publishing date</div>
 <div class="count" id="count">Loading…</div>
 <div id="results"></div>
 <div class="disclaimer"><b>Disclaimer.</b> Unofficial, automatically generated mirror — no liability for accuracy,
@@ -103,16 +114,22 @@ function highlightRe(groups){ // one combined regex → single-pass marking
 const hayOf=r=>r._hay??(r._hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic+' '
   +r.question+' '+(r.background||'')+' '+r.answer).toLowerCase().replace(/\s+/g,' '));
 function hl(s,hre){const e=esc(s);return hre?e.replace(hre,'<mark>$&</mark>'):e;}
+const ACTS=new Set(); // selected acts (empty = all)
 const familyOf=act=>act.split('-')[0].toLowerCase().replace(/[^a-z0-9]+/g,'-');
-function neededFamilies(){const act=$('act').value;
-  if(act&&MANIFEST[familyOf(act)])return[familyOf(act)];
+function actSummary(){$('actsum').textContent=
+  !ACTS.size?'All acts':ACTS.size===1?[...ACTS][0]:ACTS.size+' acts';}
+function neededFamilies(){
+  if(ACTS.size){const fams=[...new Set([...ACTS].map(familyOf))].filter(f=>MANIFEST[f]);
+    if(fams.length)return fams;}
   return Object.keys(MANIFEST);}
 function loadFamily(f){if(!CACHE[f])CACHE[f]=fetch(MANIFEST[f].file).then(r=>r.json());
   return CACHE[f];}
 function syncUrl(){const p=new URLSearchParams();
   if($('q').value.trim())p.set('q',$('q').value.trim());
-  if($('act').value)p.set('act',$('act').value);
+  if(ACTS.size)p.set('act',[...ACTS].sort().join(','));
   if($('auth').value)p.set('auth',$('auth').value);
+  if($('from').value)p.set('from',$('from').value);
+  if($('to').value)p.set('to',$('to').value);
   history.replaceState(null,'',p.toString()?'?'+p:location.pathname);}
 async function update(){
   const my=++seq;syncUrl();
@@ -124,10 +141,12 @@ async function update(){
 }
 function render(R){
   const groups=parseQuery($('q').value);
-  const act=$('act').value, auth=$('auth').value;
+  const auth=$('auth').value, from=$('from').value, to=$('to').value;
   const hits=R.filter(r=>{
-    if(act&&r.legal_act!==act)return false;
+    if(ACTS.size&&!ACTS.has(r.legal_act))return false;
     if(auth&&r.authority!==auth)return false;
+    if(from&&(!r.date||r.date<from))return false;
+    if(to&&(!r.date||r.date>to))return false;
     return matches(hayOf(r),groups);
   }).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))
     ||String(b.qa_id).localeCompare(String(a.qa_id))); // newest first, dateless last
@@ -139,6 +158,7 @@ function render(R){
       <div class="meta"><b>${esc(r.authority.toUpperCase())} ${hl(r.qa_id,hre)}</b>
         ${r.joint_id?' · '+hl(r.joint_id,hre):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,hre):''}
         ${r.topic?' · '+hl(r.topic,hre):''} · ${esc(r.status)}${r.date?' · '+esc(r.date):''}
+        ${r.archived?' · <b>⚠ archived at the authority after a review (since '+esc(r.archived)+')</b>':''}
         ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
       <div class="label">Question</div>
       <div class="a clampable">${hl(r.question,hre)}</div>
@@ -153,20 +173,31 @@ fetch('manifest.json').then(r=>r.json()).then(m=>{
   MANIFEST=m;
   const fams=Object.values(m);
   TOTAL=fams.reduce((s,f)=>s+f.count,0);
-  for(const[id,vals]of[['act',fams.flatMap(f=>f.acts)],['auth',fams.flatMap(f=>f.authorities)]]){
-    [...new Set(vals)].sort().forEach(v=>{
-      const o=document.createElement('option');o.value=v;o.textContent=v.toUpperCase();$(id).appendChild(o);});
+  const allActs=[...new Set(fams.flatMap(f=>f.acts))].sort();
+  for(const v of allActs){
+    const l=document.createElement('label'),c=document.createElement('input');
+    c.type='checkbox';c.value=v;
+    c.addEventListener('change',()=>{c.checked?ACTS.add(v):ACTS.delete(v);actSummary();update();});
+    l.appendChild(c);l.appendChild(document.createTextNode(v));$('actopts').appendChild(l);
+  }
+  for(const v of[...new Set(fams.flatMap(f=>f.authorities))].sort()){
+    const o=document.createElement('option');o.value=v;o.textContent=v.toUpperCase();$('auth').appendChild(o);
   }
   const p=new URLSearchParams(location.search);
   if(p.get('q'))$('q').value=p.get('q');
-  for(const id of['act','auth'])if(p.get(id)&&[...$(id).options].some(o=>o.value===p.get(id)))$(id).value=p.get(id);
+  (p.get('act')||'').split(',').filter(a=>allActs.includes(a)).forEach(a=>ACTS.add(a));
+  [...$('actopts').querySelectorAll('input')].forEach(c=>c.checked=ACTS.has(c.value));
+  actSummary();
+  if(p.get('auth')&&[...$('auth').options].some(o=>o.value===p.get('auth')))$('auth').value=p.get('auth');
+  for(const id of['from','to'])if(/^\d{4}-\d{2}-\d{2}$/.test(p.get(id)||''))$(id).value=p.get(id);
   if([...p.keys()].length){update();}
   else{
     $('count').textContent=TOTAL+' Q&As mirrored — search state is shareable via the URL';
     $('results').innerHTML='<div class="count">Type to search or pick a filter — or <button class="more" onclick="update()">browse all '+TOTAL+' Q&amp;As</button>.</div>';
   }
 });
-['q','act','auth'].forEach(id=>$(id).addEventListener('input',update));
+['q','auth','from','to'].forEach(id=>$(id).addEventListener('input',update));
+document.addEventListener('click',e=>{if(!$('actdd').contains(e.target))$('actdd').removeAttribute('open');});
 </script>
 </body>
 </html>

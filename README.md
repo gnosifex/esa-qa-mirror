@@ -43,25 +43,26 @@ joint_acts:
   DORA:
     register_act: "DORA"      # matches the register's "Legal act" by substring
     act_ref: "2022/2554"      # fills legal_act_ref where a portal exposes none
-    statuses: ["Final"]       # register Status values to mirror
+    statuses: ["Final", "Revised"]   # register Status values to mirror
 
 eba:
   legal_act_ids: [32]         # 32 = CRD; qa_legal_act[] facet values
   default_act_ref: "2013/36"
-  require_status: "Final"     # EBA search has no status facet — post-filter
+  require_status: "Final"     # safety net — /search is the finals tab already
+  max_pages: 600              # listing-page budget (20 Q&As per page)
 ```
 
 The EBA `legal_act_ids` are the portal's own `qa_legal_act[]` facet values — filter manually in the browser and copy the value from the resulting URL. Common banking acts: `32` = CRD · `33` = CRR · `38` = PSD2 · `31` = BRRD · `18` = MiCAR. **Caution:** CRR alone is a very large, multi-year corpus — expect a long first run.
 
 ## Using this mirror for research
 
-**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act/authority filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Words match at word start (`art. 28` finds Article 28), `"…"` searches an exact phrase, `OR`/`AND` combine terms, `/…/` is a regex, and results list the newest answers first with their publication date. Search state lives in the URL (`?q=…&act=…&auth=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so act-filtered searches only download the records they need. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
+**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act (multi-select), authority and publication-date-range filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Words match at word start (`art. 28` finds Article 28), `"…"` searches an exact phrase, `OR`/`AND` combine terms, `/…/` is a regex, and results list the newest answers first with their publication date. Search state lives in the URL (`?q=…&act=…&auth=…&from=…&to=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so act-filtered searches only download the records they need. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
 
 With a (free) GitHub account, GitHub's code search also works:
 
 - **Web search:** type your term in the repo's search box, or use the global search with `repo:gnosifex/esa-qa-mirror <term>` — e.g. `repo:gnosifex/esa-qa-mirror "critical or important function"`. Every hit is one Q&A file with question, answer, article and source link.
 - **Filter by article/act:** search for frontmatter values, e.g. `repo:gnosifex/esa-qa-mirror "article: \"28\"" DORA`.
-- **What's new:** the commit history of `data/` *is* the change log — each weekly bot commit shows exactly which Q&As were added or revised.
+- **What's new:** the commit history of `data/` *is* the change log — each bot commit shows exactly which Q&As were added or revised.
 
 Locally it gets better: clone and `grep -rl 'subcontracting' data/dora/`, open `data/` as an **Obsidian vault** — the frontmatter is deliberately single-line/Obsidian-compatible, so every record renders with filterable properties — or point an **LLM / AI agent** at `data/`: one file per Q&A with uniform frontmatter is trivially easy for machines to enumerate, filter and quote.
 
@@ -76,11 +77,15 @@ Then run `python -m qa_mirror` once for the initial corpus.
 
 ## Scheduled runs
 
-`.github/workflows/mirror.yml` runs a weekly delta and commits new/changed records. Enable it by pushing this repo to GitHub; adjust the cron as you like. Each run's diff **is** your "what's new" report. Any adapter error — or a failed register query — turns the run red (the successful part is still committed); the per-source counts land in the job summary.
+`.github/workflows/mirror.yml` runs a daily delta and commits new/changed records (the run is idempotent — the daily cadence just caps worst-case latency at ~a day, whatever weekday an authority publishes on). Each run's diff **is** your "what's new" report. Any adapter error — or a failed register query — turns the run red (the successful part is still committed); the per-source counts land in the job summary.
+
+**Every full run appends one JSON line to `runs.jsonl`** (UTC timestamp, per-source counts, SHA-256 over `state.json`) and commits it — so *"checked and unchanged"* is distinguishable from *"never ran"* in the git history itself, independent of GitHub's log retention. `--limit` smoke runs don't write it.
+
+**Pre-flight completeness check (EBA):** before fetching anything, the run asks the portal's own count endpoint how many final Q&As exist for the configured acts, aborts red in minute one if the listing-page budget (`eba.max_pages`) can't cover them, logs the expected fetch time — and fails red if discovery ends materially below the announced count (silent truncation). Listing pages that come back empty are retried once with a cache-buster: the portals intermittently serve listings as JS-only shells from stale cache nodes.
 
 Each mirror run then calls `pages.yml`, which builds the search index from `data/` and deploys the search page as a GitHub Pages artifact (`pages.yml` also runs on relevant pushes to main). **One-time setup:** set the Pages source to "GitHub Actions" (repo Settings → Pages → Build and deployment → Source).
 
-**Removed Q&As are never deleted, only marked:** when a complete, error-free discovery pass no longer contains a known record, the run adds `x_delisted: "YYYY-MM-DD"` to its frontmatter (shown as a warning on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears, the record is rewritten and the marker cleared automatically.
+**Removed Q&As are never deleted, only marked:** when a complete, error-free discovery pass no longer contains a known record, the run resolves EBA records against the portal's **archive tab** first — *archived after a review* gets `x_archived: "YYYY-MM-DD"`, *vanished without trace* gets `x_delisted: "YYYY-MM-DD"` (both shown as warnings on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears, the record is rewritten and the marker cleared automatically. On the register side, `statuses: ["Final", "Revised"]` keeps a Q&A discovered when its final answer is revised — the revised content is mirrored instead of the record being mis-marked as delisted.
 
 **Plausibility brake:** if more than `max(5, 20%)` of a source's known records vanish at once, that is almost certainly a broken query (the register or a portal silently ignoring a filter), not mass withdrawal — the run refuses to mark anything for that authority and exits red instead. `--allow-mass-delisting` overrides after manual verification. The `probe` workflow (manual dispatch) shows what the sources actually serve the runner when diagnosing such failures.
 
@@ -124,6 +129,7 @@ The first block of frontmatter keys (`authority` … `status`, `source_url`) is 
 ## Caveats
 
 - **Unofficial mirror.** The portal version always prevails; every record links its source. Q&A answers are generally not legally binding (for Level-1/2 questions answered by the European Commission they carry particular weight) — assess bindingness per record.
+- **Answers speak as of their publication date.** They interpret the legal acts in force at that time, and the authorities do not systematically revisit published Q&As after subsequent changes to the underlying legislation — check whether the cited provisions have since been amended. The publication date is on every record and search result.
 - **Scrapers break.** The adapters parse the current portal HTML, and the register client reverse-engineers PowerBI's undocumented backend (both verified 2026-07-08). Frontend/backend changes will break the affected piece; each detail fetch fails independently without stopping the others, a failed register query fails closed (no delisting), and the CLI exit code/summary shows errors. Fixes are local to one small module.
 - **Be polite.** Requests are rate-limited (`delay_seconds`, default 1.5 s) and the User-Agent identifies the tool. Keep it that way.
 - Content of the mirrored Q&As © the respective authorities (EBA/EIOPA/ESMA); reuse subject to their legal notices — [EBA legal notice](https://www.eba.europa.eu/legal-notice) · [EIOPA legal notice](https://www.eiopa.europa.eu/legal-notice_en) · [ESMA legal notice](https://www.esma.europa.eu/legal-notice). Every mirrored record carries its own disclaimer and source link. This repository's code is MIT-licensed.
@@ -136,9 +142,10 @@ qa_mirror/              the tool: common.py, register.py (joint discovery),
 config.yaml             which Q&A sets to mirror
 data/<act-family>/      the mirrored records, authority in the filename (committed)
 state.json              delta-run state (committed)
+runs.jsonl              one JSON line per full mirror run — the audit trail (committed)
 tests/                  pytest suite (fixture HTML per portal + unit tests)
 docs/                   search page (index.html committed; JSON index generated at deploy)
-.github/workflows/      weekly mirror run (mirror.yml), search-site deploy (pages.yml),
+.github/workflows/      daily mirror run (mirror.yml), search-site deploy (pages.yml),
                         tests/lint (ci.yml), network probe (probe.yml)
 ```
 

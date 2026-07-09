@@ -15,7 +15,10 @@ joint_acts:
   DORA:
     register_act: "DORA"
     act_ref: "2022/2554"
-    statuses: ["Final"]
+    # "Revised" is a real register state (a revised final answer): without it a
+    # Final→Revised transition would fall out of discovery, mis-marking the
+    # record delisted and never mirroring the revised content.
+    statuses: ["Final", "Revised"]
 
 # EBA Single Rulebook Q&As — banking-sector acts that live solely at the EBA
 # (no Joint Q&As). Add further banking acts here as needed (config only):
@@ -24,5 +27,9 @@ joint_acts:
 eba:
   legal_act_ids: [32]          # 32 = CRD (Directive 2013/36/EU)
   default_act_ref: "2013/36"
-  # The EBA search has no status facet; this post-filter keeps only finals.
+  # /search is the finals-only tab (statuses live on sibling tabs); this
+  # post-filter is a safety net, not the primary status selection.
   require_status: "Final"
+  # Listing-page budget (20 Q&As per page). The pre-flight check against the
+  # portal's count endpoint fails the run in minute 1 if this is too small.
+  max_pages: 600
