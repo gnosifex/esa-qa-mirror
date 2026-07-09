@@ -22,10 +22,10 @@ joint_acts:
 
 # EBA Single Rulebook Q&As — banking-sector acts that live solely at the EBA
 # (no Joint Q&As). Add further banking acts here as needed (config only):
-#   33 = CRR (575/2013)  ·  38 = PSD2  ·  31 = BRRD  ·  18 = MiCAR
+#   38 = PSD2  ·  31 = BRRD  ·  18 = MiCAR
 # Caution: CRR alone is a very large corpus (years of Q&As) — long first run.
 eba:
-  legal_act_ids: [32]          # 32 = CRD (Directive 2013/36/EU)
+  legal_act_ids: [32, 33]      # 32 = CRD (Directive 2013/36/EU) · 33 = CRR (575/2013)
   default_act_ref: "2013/36"
   # /search is the finals-only tab (statuses live on sibling tabs); this
   # post-filter is a safety net, not the primary status selection.
