@@ -46,12 +46,12 @@ def _write_step_summary(totals: dict):
     lines = [
         "## Mirror run",
         "",
-        "| authority | seen | checked | written | archived | delisted | errors |",
+        "| authority | enumerated | checked | written | archived | delisted | errors |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for auth, t in totals.items():
         lines.append(
-            f"| {auth} | {t['seen']} | {t['checked']} | {t['written']} "
+            f"| {auth} | {t['enumerated']} | {t['checked']} | {t['written']} "
             f"| {t['archived']} | {t['delisted']} | {t['errors']} |"
         )
     with open(path, "a", encoding="utf-8") as fh:
@@ -183,6 +183,7 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 continue
             key = f"{auth}:{_slug_from_url(row['link'])}"
             seen[auth].add(key)
+            totals[auth]["enumerated"] += 1
             in_window = (row.get("date_publication") or "") >= mode["window_start"]
             entries.append((key, in_window, row))
         n = 0
@@ -271,6 +272,22 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
         try:
             win = {_slug_from_url(u) for u in eba.list_detail_urls(
                 http, params, published_since=mode["window_start"])}
+            if win:
+                # A stale cache node can serve the windowed listing UNfiltered
+                # (the known EBA disease) — every record would look freshly
+                # published and the run would degenerate into an accidental
+                # sweep. The count endpoint with the same date facet says how
+                # many finals the window really holds; distrust a listing
+                # that is implausibly larger.
+                announced = eba.expected_counts(
+                    http, params, published_since=mode["window_start"]
+                ).get("final")
+                if announced is not None and len(win) > announced * 1.5 + 3:
+                    print(f"[eba] window listing implausible ({len(win)} slugs "
+                          f"vs {announced} announced) — cache node ignored the "
+                          "date facet; relying on the verification queue",
+                          file=sys.stderr)
+                    win = set()
         except Exception as exc:
             print(f"[eba] window listing failed ({exc}) — relying on the "
                   "verification queue", file=sys.stderr)
@@ -281,6 +298,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
             listed += 1
             slug = _slug_from_url(url)
             seen["eba"].add(f"eba:{slug}")
+            totals["eba"]["enumerated"] += 1
             entries.append((f"eba:{slug}", slug in win, url))
             if args.limit and listed >= args.limit:
                 complete["eba"] = False
@@ -403,8 +421,8 @@ def main(argv=None) -> int:
     today = datetime.now(timezone.utc).date().isoformat()
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
-    totals = {a: {"seen": 0, "written": 0, "checked": 0, "archived": 0,
-                  "delisted": 0, "errors": 0} for a in ADAPTERS}
+    totals = {a: {"enumerated": 0, "seen": 0, "written": 0, "checked": 0,
+                  "archived": 0, "delisted": 0, "errors": 0} for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
     complete = {a: True for a in ADAPTERS}
     mode = _run_mode(state, cfg, args)
@@ -428,7 +446,7 @@ def main(argv=None) -> int:
     state.save()
     print("\nSummary:")
     for auth, t in totals.items():
-        print(f"  {auth}: {t['seen']} seen, {t['checked']} checked, "
+        print(f"  {auth}: {t['enumerated']} enumerated, {t['checked']} checked, "
               f"{t['written']} written, {t['archived']} archived, "
               f"{t['delisted']} delisted, {t['errors']} errors")
     _write_step_summary(totals)

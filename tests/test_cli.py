@@ -45,7 +45,8 @@ def install(monkeypatch, rows, eba_listing=None, eba_counts=None, eba_archive=No
         monkeypatch.setattr(eba, "list_detail_urls", listing)
     # never let unit tests hit the live count/archive endpoints
     monkeypatch.setattr(eba, "expected_counts",
-                        lambda http, params: dict(eba_counts or {}))
+                        lambda http, params, published_since="":
+                        dict(eba_counts or {}))
     monkeypatch.setattr(eba, "list_archive_slugs",
                         lambda http, params: set(eba_archive or ()))
 
@@ -335,6 +336,10 @@ def test_incremental_run_skips_recently_verified_records(root, monkeypatch):
     line = manifest_line(root, 1)
     assert line["mode"] == "incremental"
     assert all(t["checked"] == 0 for t in line["totals"].values())
+    # the audit line still proves the presence check ran for every source
+    assert line["totals"]["eiopa"]["enumerated"] == 2
+    assert line["totals"]["esma"]["enumerated"] == 1
+    assert line["totals"]["eba"]["enumerated"] == 0  # no eba section configured
 
 
 def test_recently_published_row_is_refetched_in_window(root, monkeypatch):
@@ -384,3 +389,27 @@ def test_sweep_marker_not_set_by_limited_runs(root, monkeypatch):
     install(monkeypatch, default_rows())
     assert run(root, "--limit", "1") == 0
     assert State(root / "state.json").data["last_full_sweep"] == ""
+
+
+def test_unfiltered_window_listing_is_distrusted(tmp_path, monkeypatch):
+    # a stale cache node serves the windowed (published_since) listing without
+    # the date filter → every record looks freshly published. The count
+    # endpoint announces the real window size; the run must discard the
+    # window instead of degenerating into an accidental full sweep.
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    ids = ["2013_%d" % i for i in range(1, 7)]
+    install(monkeypatch, [], eba_listing=eba_listing(*ids))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 0  # sweep stamps verified_at
+
+    def listing(http, params, published_since="", **kw):
+        return iter(eba_listing(*ids))  # windowed call returns the FULL listing
+    monkeypatch.setattr(eba, "list_detail_urls", listing)
+    monkeypatch.setattr(eba, "expected_counts",
+                        lambda http, params, published_since="":
+                        {"final": 0} if published_since else {})
+    assert cli.main(["--root", str(tmp_path)]) == 0
+    import json
+    line = json.loads((tmp_path / "runs.jsonl").read_text().splitlines()[1])
+    assert line["mode"] == "incremental"
+    assert line["totals"]["eba"]["checked"] == 0  # window discarded, queue empty

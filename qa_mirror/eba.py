@@ -89,14 +89,20 @@ def list_archive_slugs(http: Http, params: dict) -> set[str]:
     return slugs
 
 
-def expected_counts(http: Http, params: dict) -> dict[str, int]:
+def expected_counts(http: Http, params: dict,
+                    published_since: str = "") -> dict[str, int]:
     """Per-status-tab totals for the configured acts, from the portal's own
     count endpoint — e.g. {"final": 96, "review": 3, "rejected": 71,
-    "archive": 115}. Empty dict when the endpoint is unavailable or changes
-    shape (callers must treat the pre-flight as best-effort, never fatal)."""
+    "archive": 115}. published_since narrows the counts with the same date
+    facet the window listing uses. Empty dict when the endpoint is
+    unavailable or changes shape (callers must treat the pre-flight as
+    best-effort, never fatal)."""
+    q = _act_query(params)
+    if published_since:
+        q += f"&qa_final_publishing_date_start={_facet_date(published_since)}"
     try:
         resp = http.get(
-            f"{BASE}/qa-search-count?{_act_query(params)}",
+            f"{BASE}/qa-search-count?{q}",
             headers={"X-Requested-With": "XMLHttpRequest"},
         )
         counts = {}
