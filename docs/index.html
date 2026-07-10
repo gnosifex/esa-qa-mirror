@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ESA Q&A Search — unofficial mirror (EBA · EIOPA · ESMA)</title>
+<title>Banking Regulation Q&A Search — unofficial mirror (EBA Single Rulebook · Joint ESAs)</title>
 <style>
   :root { --bg:#fff; --fg:#1a1a1a; --muted:#666; --card:#f6f6f7; --accent:#0b5fff; --border:#ddd; }
   @media (prefers-color-scheme: dark) {
@@ -44,8 +44,9 @@
 </style>
 </head>
 <body>
-<h1>ESA Q&amp;A Search</h1>
-<div class="sub">Unofficial mirror of the <b>final</b> EBA / EIOPA / ESMA Q&amp;As (DORA, CRD, CRR; daily refresh) —
+<h1>Banking Regulation Q&amp;A Search</h1>
+<div class="sub">Unofficial mirror of the <b>final</b> supervisory Q&amp;As relevant to banking regulation —
+EBA Single Rulebook and Joint ESAs Q&amp;As, currently <span id="actlist">CRD, CRR, DORA</span> · daily refresh —
 <a href="https://github.com/gnosifex/esa-qa-mirror">source &amp; docs on GitHub</a>. No account needed.</div>
 <div class="notice"><b>Disclaimer — unofficial mirror, no guarantee, no liability</b> for accuracy, completeness or timeliness;
 conversion errors are possible. <b>Before any use or reliance, verify each Q&amp;A against the linked original</b> —
@@ -182,6 +183,10 @@ fetch('manifest.json').then(r=>r.json()).then(m=>{
       +(META.last_full_sweep?' · last full sweep '+META.last_full_sweep:'');
   }
   const allActs=[...new Set(fams.flatMap(f=>f.acts))].sort();
+  // the covered act families come from the corpus itself — new acts appear
+  // here automatically when their records land in data/
+  $('actlist').textContent=[...new Set(fams.flatMap(f=>f.acts.map(a=>a.split('-')[0])))].sort().join(', ');
+
   const setAll=on=>{ACTS.clear();if(on)allActs.forEach(a=>ACTS.add(a));
     [...$('actopts').querySelectorAll('input')].forEach(c=>c.checked=on);
     actSummary();update();};
