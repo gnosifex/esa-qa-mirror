@@ -22,6 +22,7 @@
   .dd summary::-webkit-details-marker { display:none; }
   .dd summary::after { content:" ▾"; color:var(--muted); }
   .dd[open] summary { border-color:var(--accent); }
+  .dd summary.placeholder { color:var(--muted); }
   .ddopts { position:absolute; z-index:10; top:calc(100% + 4px); left:0; min-width:230px; max-height:280px; overflow:auto; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:.45rem .7rem; box-shadow:0 4px 14px rgba(0,0,0,.18); }
   .ddopts label { display:block; font-size:.9rem; padding:.18rem 0; cursor:pointer; white-space:nowrap; }
   .ddopts input { margin-right:.4rem; }
@@ -54,7 +55,7 @@ the authority's portal version prevails. Content © EBA / EIOPA / ESMA.</div>
 <div class="controls">
   <input id="q" type="search" placeholder='Search questions &amp; answers… e.g. "register of information" OR subcontracting' autofocus
     autocorrect="off" autocapitalize="off" spellcheck="false">
-  <details class="dd" id="actdd"><summary id="actsum">All acts</summary><div class="ddopts" id="actopts"></div></details>
+  <details class="dd" id="actdd"><summary id="actsum" class="placeholder">Select acts…</summary><div class="ddopts" id="actopts"></div></details>
   <select id="auth"><option value="">All authorities</option></select>
   <input id="from" type="date" title="published from (final publishing date)">
   <input id="to" type="date" title="published until (final publishing date)">
@@ -120,8 +121,12 @@ const hayOf=r=>r._hay??(r._hay=(r.qa_id+' '+r.joint_id+' '+r.article+' '+r.topic
 function hl(s,hre){const e=esc(s);return hre?e.replace(hre,'<mark>$&</mark>'):e;}
 const ACTS=new Set(); // selected acts (empty = all)
 const familyOf=act=>act.split('-')[0].toLowerCase().replace(/[^a-z0-9]+/g,'-');
-function actSummary(){$('actsum').textContent=
-  !ACTS.size?'All acts':ACTS.size===1?[...ACTS][0]:ACTS.size+' acts';}
+function actSummary(){
+  // empty selection means "no act filter" — say so as an invitation, not as
+  // the (pre-first-search untrue) assertion that all acts are being shown
+  $('actsum').textContent=
+    !ACTS.size?'Select acts…':ACTS.size===1?[...ACTS][0]:ACTS.size+' acts';
+  $('actsum').classList.toggle('placeholder',!ACTS.size);}
 function neededFamilies(){
   if(ACTS.size){const fams=[...new Set([...ACTS].map(familyOf))].filter(f=>MANIFEST[f]);
     if(fams.length)return fams;}
