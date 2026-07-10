@@ -159,8 +159,13 @@ def fetch_rows(session: requests.Session | None = None) -> list[dict]:
         model_id, dbname = model["id"], model.get("dbName")
         report_id = (meta.get("exploration") or {}).get("report", {}).get("objectId")
 
+        # PowerBI renamed the payload key from "models" to "modelIds" (seen
+        # live 2026-07-09: 400 "Both ModelIds and ModelObjectIds are empty"
+        # while the browser embed kept working). Send both so either backend
+        # generation accepts the request.
         cs = _pbi(session, "/public/reports/conceptualschema",
-                  {"userPreferredLocale": "en-US", "models": [model_id]})
+                  {"userPreferredLocale": "en-US",
+                   "modelIds": [model_id], "models": [model_id]})
         entities = cs["schemas"][0]["schema"]["Entities"]
         # the data table is the entity with the most columns (the date-dimension
         # helper tables have only 7)
