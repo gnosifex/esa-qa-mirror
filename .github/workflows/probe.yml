@@ -168,7 +168,8 @@ jobs:
           for attempt in range(3):
               cs = s.post(f"https://{HOST}/public/reports/conceptualschema",
                           headers=H,
-                          json={"userPreferredLocale": "en-US", "models": [mid]},
+                          json={"userPreferredLocale": "en-US",
+                                "modelIds": [mid], "models": [mid]},
                           timeout=60)
               print(f"conceptualschema attempt {attempt}: {cs.status_code}")
               print("  body:", cs.text[:1500])
