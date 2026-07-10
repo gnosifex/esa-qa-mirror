@@ -336,6 +336,10 @@ def test_incremental_run_skips_recently_verified_records(root, monkeypatch):
     line = manifest_line(root, 1)
     assert line["mode"] == "incremental"
     assert all(t["checked"] == 0 for t in line["totals"].values())
+    # the audit line still proves the presence check ran for every source
+    assert line["totals"]["eiopa"]["enumerated"] == 2
+    assert line["totals"]["esma"]["enumerated"] == 1
+    assert line["totals"]["eba"]["enumerated"] == 0  # no eba section configured
 
 
 def test_recently_published_row_is_refetched_in_window(root, monkeypatch):
