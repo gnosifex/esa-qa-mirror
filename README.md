@@ -9,21 +9,21 @@ Two bodies of Q&As matter for a credit institution, and this tool covers both:
 - **Joint ESAs Q&As** — cross-sectoral acts answered jointly by EBA/EIOPA/ESMA. **DORA** is the one that binds banks today. These are discovered through the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas), then fetched from whichever authority's webtool received the question.
 - **EBA Single Rulebook Q&As** — the banking-sector acts that live solely at the EBA: **CRD and CRR** out of the box, with **PSD2 / BRRD / MiCAR** a one-line config change.
 
-**Why:** the authorities publish these Q&As as individual web pages made for interactive reading — three webtools, three formats. What's missing is the corpus **as data**: everything in one grip, normalized and machine-readable. These supervisory interpretations materially affect how an article must be read, and having all of them enumerable in one repository makes them not just searchable, diffable and citable, but directly usable as an **LLM-ready knowledge base** — feed `data/` to an AI assistant for retrieval, cross-cutting analysis or drafting support. That is what this mirror provides: one Markdown file per Q&A with uniform frontmatter, kept current via scheduled delta runs. Only **final** Q&As are mirrored.
+**Why:** the authorities publish these Q&As as individual web pages made for interactive reading — three webtools, three formats. What's missing is the corpus **as data**: everything in one grip, normalized and machine-readable. These supervisory interpretations materially affect how an article must be read, and having all of them enumerable in one repository makes them not just searchable, diffable and citable, but directly usable as an **LLM-ready knowledge base** — feed `data/` to an AI assistant for retrieval, cross-cutting analysis or drafting support. That is what this mirror provides: one Markdown file per Q&A with uniform frontmatter, kept current via daily incremental runs with rolling re-verification. Only **final** Q&As are mirrored (including revised finals).
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
 python -m qa_mirror --limit 5       # smoke test: max 5 records per source
-python -m qa_mirror                 # full delta run per config.yaml (first run mirrors everything — takes a while)
+python -m qa_mirror                 # incremental run per config.yaml (the very first run is a full sweep — takes a while)
 python -m qa_mirror --authority eba # one receiving authority only
 python -m qa_mirror.site            # rebuild the docs/ search index from data/
 ```
 
 The search index (`docs/records-*.json`, `docs/manifest.json`) is a build artifact derived from `data/` — it is gitignored and generated at deploy time by the `pages` workflow, so the corpus lives in the repo exactly once.
 
-Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dora/eba-2024-7089.md`) — grouped by legal act, with the basis act and its level-2 acts in one directory. `state.json` tracks content hashes so repeated runs only rewrite new or changed records (delta behaviour by default; `--full` rewrites everything). The `retrieved_at` timestamp is excluded from the change detection.
+Records land in `data/<legal-act-family>/<authority>-<qa-id>.md` (e.g. `data/dora/eba-2024-7089.md`) — grouped by legal act, with the basis act and its level-2 acts in one directory. `state.json` tracks content hashes, per-record verification timestamps and the date of the last full sweep — repeated runs only rewrite new or changed records (`--full` rewrites everything, `--sweep` forces a full content re-verification). The `retrieved_at` timestamp is excluded from the change detection.
 
 ## How discovery works
 
@@ -46,17 +46,23 @@ joint_acts:
     statuses: ["Final", "Revised"]   # register Status values to mirror
 
 eba:
-  legal_act_ids: [32]         # 32 = CRD; qa_legal_act[] facet values
+  legal_act_ids: [32, 33]     # 32 = CRD · 33 = CRR; qa_legal_act[] facet values
   default_act_ref: "2013/36"
   require_status: "Final"     # safety net — /search is the finals tab already
   max_pages: 600              # listing-page budget (20 Q&As per page)
+
+incremental:                  # fetch scheduling — see config.yaml for details
+  verify_after_days: 7        # re-check each record's content at least weekly
+  daily_verify_budget: 600    # cap on queue-driven detail fetches per run
+  window_days: 14             # re-fetch anything published in the last N days
+  sweep_after_days: 31        # full re-verification due after this many days
 ```
 
-The EBA `legal_act_ids` are the portal's own `qa_legal_act[]` facet values — filter manually in the browser and copy the value from the resulting URL. Common banking acts: `32` = CRD · `33` = CRR · `38` = PSD2 · `31` = BRRD · `18` = MiCAR. **Caution:** CRR alone is a very large, multi-year corpus — expect a long first run.
+The EBA `legal_act_ids` are the portal's own `qa_legal_act[]` facet values — filter manually in the browser and copy the value from the resulting URL. Further banking acts: `38` = PSD2 · `31` = BRRD · `18` = MiCAR. **Caution:** a large act makes the *first* run (a full sweep) long; day-to-day incremental runs stay fast.
 
 ## Using this mirror for research
 
-**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act (multi-select), authority and publication-date-range filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Words match at word start (`art. 28` finds Article 28), `"…"` searches an exact phrase, `OR`/`AND` combine terms, `/…/` is a regex, and results list the newest answers first with their publication date. Search state lives in the URL (`?q=…&act=…&auth=…&from=…&to=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so act-filtered searches only download the records they need. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
+**Without any account or tooling:** use the search page at **<https://gnosifex.github.io/esa-qa-mirror/>** — full-text search over all mirrored Q&As with act (multi-select), authority and publication-date-range filters, straight in the browser (static GitHub Pages site, rebuilt on every mirror run). Words match at word start (`art. 28` finds Article 28), `"…"` searches an exact phrase, `OR`/`AND` combine terms, `/…/` is a regex, and results list the newest answers first with their publication date and the date the mirror last saw them change; a status line shows how fresh the mirror's own checks are (presence daily, rolling content re-verification, last full sweep). Search state lives in the URL (`?q=…&act=…&auth=…&from=…&to=…`), so result views are shareable/bookmarkable; record sets are loaded per act family, so act-filtered searches only download the records they need. Alternatively, **Code → Download ZIP** gives you the whole corpus for local searching.
 
 With a (free) GitHub account, GitHub's code search also works:
 
@@ -109,7 +115,8 @@ date_submission_date_iso: "2024-05-20"        # normalized twin, for sorting/fil
 date_final_publishing_date: "08/08/2025"
 date_final_publishing_date_iso: "2025-08-08"
 x_…: portal-specific extras, kept verbatim
-x_delisted: "2026-07-08"              # only if the Q&A vanished from discovery
+x_delisted: "2026-07-08"              # only if the Q&A vanished without trace
+x_archived: "2026-07-08"              # only if it moved to the EBA archive tab
 source_url: "https://…"
 retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 ---
@@ -123,7 +130,8 @@ retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 …
 
 > **Disclaimer.** Unofficial, automatically generated mirror copy — no liability
-> for accuracy/completeness; verify against the original before any use.
+> for accuracy/completeness; answers speak as of their publication date;
+> verify against the original before any use.
 ```
 
 The first block of frontmatter keys (`authority` … `status`, `source_url`) is **uniform across every record**; `legal_act`/`legal_act_ref` are normalized (portal strings differ wildly; ESMA exposes none — the configured `act_ref`/`default_act_ref` fills it). Portal-specific fields are preserved verbatim under the `x_` prefix. **Privacy by default:** submitter identity fields published by the EBA portal (name of institution/submitter, country) are deliberately not mirrored.
@@ -132,7 +140,7 @@ The first block of frontmatter keys (`authority` … `status`, `source_url`) is 
 
 - **Unofficial mirror.** The portal version always prevails; every record links its source. Q&A answers are generally not legally binding (for Level-1/2 questions answered by the European Commission they carry particular weight) — assess bindingness per record.
 - **Answers speak as of their publication date.** They interpret the legal acts in force at that time, and the authorities do not systematically revisit published Q&As after subsequent changes to the underlying legislation — check whether the cited provisions have since been amended. The publication date is on every record and search result.
-- **Scrapers break.** The adapters parse the current portal HTML, and the register client reverse-engineers PowerBI's undocumented backend (both verified 2026-07-08). Frontend/backend changes will break the affected piece; each detail fetch fails independently without stopping the others, a failed register query fails closed (no delisting), and the CLI exit code/summary shows errors. Fixes are local to one small module.
+- **Scrapers break.** The adapters parse the current portal HTML, and the register client reverse-engineers PowerBI's undocumented backend (both verified 2026-07-09). Frontend/backend changes will break the affected piece; each detail fetch fails independently without stopping the others, a failed register query fails closed (no delisting), and the CLI exit code/summary shows errors. Fixes are local to one small module.
 - **Be polite.** Requests are rate-limited (`delay_seconds`, default 1.5 s) and the User-Agent identifies the tool. Keep it that way.
 - Content of the mirrored Q&As © the respective authorities (EBA/EIOPA/ESMA); reuse subject to their legal notices — [EBA legal notice](https://www.eba.europa.eu/legal-notice) · [EIOPA legal notice](https://www.eiopa.europa.eu/legal-notice_en) · [ESMA legal notice](https://www.esma.europa.eu/legal-notice). Every mirrored record carries its own disclaimer and source link. This repository's code is MIT-licensed.
 
@@ -155,7 +163,7 @@ docs/                   search page (index.html committed; JSON index generated 
 
 DORA Q&As are **Joint ESAs Q&As**: one shared corpus, answered jointly, hosted in the webtool of whichever authority received the question, indexed centrally in the [Joint Q&A Register](https://www.esma.europa.eu/joint-committee/joint-qas) (a PowerBI embed).
 
-**The register is the discovery index; the authority webtools are the source of truth for content.** The mirror reads the register to learn *which* joint Q&As exist and where each one lives, then fetches the answer from the receiving authority's own detail page. This split is deliberate: the register gives completeness (it lists every joint Q&A, including EU-Commission-answered finals a per-portal search would miss) while the webtool gives the authoritative, full-text answer. A register row whose link doesn't resolve to a fetchable detail page is skipped rather than trusted blindly.
+**The register is the discovery index; the authority webtools are the source of truth for content.** The mirror reads the register to learn *which* joint Q&As exist and where each one lives, then fetches the answer from the receiving authority's own detail page. This split is deliberate: the register gives completeness (it lists every joint Q&A, including EU-Commission-answered finals a per-portal search would miss) while the webtool gives the authoritative, full-text answer. A register row whose link cell is broken (data-entry errors occur — a page title instead of a URL, verified live) gets its detail URL re-derived from the row's own ids; a wanted row where not even that works turns the run red instead of being skipped in silence.
 
 Cross-portal duplicates **do occur** (e.g. joint Q&A DORA003 is published both as EIOPA "2734 - DORA003" and ESMA 2356). The mirror keeps every authority's own copy — each webtool is the source of truth for its records — and exposes the shared `joint_id` in the frontmatter (from the register, normalized to its native format, e.g. `DORA003`) as the key for deduplication and cross-checks.
 
