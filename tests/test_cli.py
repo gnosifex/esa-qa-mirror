@@ -413,3 +413,25 @@ def test_unfiltered_window_listing_is_distrusted(tmp_path, monkeypatch):
     line = json.loads((tmp_path / "runs.jsonl").read_text().splitlines()[1])
     assert line["mode"] == "incremental"
     assert line["totals"]["eba"]["checked"] == 0  # window discarded, queue empty
+
+
+def test_giant_window_distrusted_even_when_count_endpoint_lies(tmp_path, monkeypatch):
+    # the SAME broken cache node can serve the windowed *count* unfiltered,
+    # "confirming" the unfiltered listing — the hard cap still catches it
+    (tmp_path / "config.yaml").write_text(
+        EBA_CFG + "incremental:\n  window_max: 3\n", encoding="utf-8")
+    ids = ["2013_%d" % i for i in range(1, 7)]
+    install(monkeypatch, [], eba_listing=eba_listing(*ids))
+    monkeypatch.setattr(eba, "fetch_record", eba_fetch_final)
+    assert cli.main(["--root", str(tmp_path)]) == 0  # sweep stamps verified_at
+
+    def listing(http, params, published_since="", **kw):
+        return iter(eba_listing(*ids))  # windowed call returns the FULL listing
+    monkeypatch.setattr(eba, "list_detail_urls", listing)
+    # count endpoint "confirms" the unfiltered window (same cache disease)
+    monkeypatch.setattr(eba, "expected_counts",
+                        lambda http, params, published_since="": {"final": 6})
+    assert cli.main(["--root", str(tmp_path)]) == 0
+    import json
+    line = json.loads((tmp_path / "runs.jsonl").read_text().splitlines()[1])
+    assert line["totals"]["eba"]["checked"] == 0  # cap discarded the window

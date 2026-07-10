@@ -282,11 +282,18 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
                 announced = eba.expected_counts(
                     http, params, published_since=mode["window_start"]
                 ).get("final")
-                if announced is not None and len(win) > announced * 1.5 + 3:
-                    print(f"[eba] window listing implausible ({len(win)} slugs "
-                          f"vs {announced} announced) — cache node ignored the "
-                          "date facet; relying on the verification queue",
-                          file=sys.stderr)
+                # Hard cap as backstop: the count endpoint can be unavailable
+                # (check would be fail-open) or served by the SAME broken
+                # cache node (an unfiltered count "confirms" the unfiltered
+                # listing) — but a two-week window with hundreds of freshly
+                # published finals is impossible in this corpus either way.
+                cap = int((cfg.get("incremental") or {}).get("window_max", 250))
+                if ((announced is not None and len(win) > announced * 1.5 + 3)
+                        or len(win) > cap):
+                    print(f"[eba] window listing implausible ({len(win)} slugs, "
+                          f"announced {announced}, cap {cap}) — cache node "
+                          "ignored the date facet; relying on the verification "
+                          "queue", file=sys.stderr)
                     win = set()
         except Exception as exc:
             print(f"[eba] window listing failed ({exc}) — relying on the "
