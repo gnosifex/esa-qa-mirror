@@ -271,6 +271,22 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
         try:
             win = {_slug_from_url(u) for u in eba.list_detail_urls(
                 http, params, published_since=mode["window_start"])}
+            if win:
+                # A stale cache node can serve the windowed listing UNfiltered
+                # (the known EBA disease) — every record would look freshly
+                # published and the run would degenerate into an accidental
+                # sweep. The count endpoint with the same date facet says how
+                # many finals the window really holds; distrust a listing
+                # that is implausibly larger.
+                announced = eba.expected_counts(
+                    http, params, published_since=mode["window_start"]
+                ).get("final")
+                if announced is not None and len(win) > announced * 1.5 + 3:
+                    print(f"[eba] window listing implausible ({len(win)} slugs "
+                          f"vs {announced} announced) — cache node ignored the "
+                          "date facet; relying on the verification queue",
+                          file=sys.stderr)
+                    win = set()
         except Exception as exc:
             print(f"[eba] window listing failed ({exc}) — relying on the "
                   "verification queue", file=sys.stderr)
