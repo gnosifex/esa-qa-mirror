@@ -32,7 +32,7 @@ jobs:
           # (seen live 2026-07-10: a 3h-late cron ran pre-fix code and its
           # commit step failed on the rebase)
           ref: ${{ github.ref_name }}
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
