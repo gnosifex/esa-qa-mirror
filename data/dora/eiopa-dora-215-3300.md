@@ -16,7 +16,7 @@ date_submission_to_esas: "2025-03-24"
 date_submission_to_esas_iso: "2025-03-24"
 x_answered_by: "Joint ESAs"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-215-3300_en"
-retrieved_at: "2026-07-09T12:23:09+00:00"
+retrieved_at: "2026-07-24T06:39:21+00:00"
 ---
 
 # EIOPA Q&A DORA 215 - 3300
@@ -27,7 +27,15 @@ I would appreciate a clear answer regarding how financial entities should handle
 
 ## Answer
 
-In line with Article 28(3) of Regulation (EU) 2022/2554 (DORA), the Register of Information is part of the ICT risk management framework of financial entities and should be therefore considered as the financial entity’s risk management tool to identify ICT service providers. If a reseller only supplies licenses without providing ICT services on an ongoing basis, it does not qualify as an ICT third-party service provider according to the definition of ICT services provided in Article 3(21) DORA). However, in case the services provided qualify as ICT services, for the purpose of the proper completion of the Register of Information the following two scenarios need to be addressed individually: 1) Existence of direct contract between the financial entity and the ICT third-party service provider. In this case, the effective ICT service provider should be recorded by the financial entity in the Register of Information. 2) Where no direct contract exists with the effective ICT third-party service provider, the financial entity should record the agreement with the reseller and complement it with any available information on the effective ICT third-party service provider as subcontractor (to this extent, template B_05.02 of the Register of Information as specified in COMMISSION IMPLEMENTING REGULATION (EU) 2024/2956 requires to indicate the ICT service supply chain, while template B_05.01 requires for indicate all subcontractors included in template B-05.02).
+In line with Article 28(3) of Regulation (EU) 2022/2554 (DORA), the Register of Information is part of the ICT risk management framework of financial entities and should be therefore considered as the financial entity’s risk management tool to identify ICT service providers. If a reseller only supplies licenses without providing ICT services on an ongoing basis, it does not qualify as an ICT third-party service provider according to the definition of ICT services provided in Article 3(21) DORA). However, in case the services provided qualify as ICT services, for the purpose of the proper completion of the Register of Information the following two scenarios need to be addressed individually:
+
+1) Existence of direct contract between the financial entity and the ICT third-party service provider. In this case, the effective ICT service provider should be recorded by the financial entity in the Register of Information.
+
+2) Where no direct contract exists with the effective ICT third-party service provider, the financial entity should record the agreement with the reseller and complement it with any available information on the effective ICT third-party service provider as subcontractor (to this extent, template B_05.02 of the Register of Information as specified in COMMISSION IMPLEMENTING REGULATION (EU) 2024/2956 requires to indicate the ICT service supply chain, while template B_05.01 requires for indicate all subcontractors included in template B-05.02).
+
+The accountability for contractual obligations, including SLAs, remains with the reseller, but risks linked to the effective provider should still be considered in accordance with DORA level 1 and Commission Delegated Regulation (EU) 2025/532 of 24 March 2025.
+
+The above is without prejudice to the obligations that financial entities must abide by their third-party risk management framework, stemming from DORA and from other sectoral legislation.
 
 ---
 
