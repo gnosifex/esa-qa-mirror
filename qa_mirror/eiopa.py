@@ -65,7 +65,7 @@ def fetch_record(http: Http, url: str) -> Record:
             body = re.sub(rf"^{re.escape(heading.get_text(' ', strip=True))}\s*", "", body).strip()
         body = re.sub(
             r"^(?:eiopa\s+answer|answer|background of the question|background|question)\b[\s:]*",
-            "", body, flags=re.I,
+            "", body, flags=re.IGNORECASE,
         )
         # "background" first: its heading contains the word "question" too
         if "background" in title and not rec.background:

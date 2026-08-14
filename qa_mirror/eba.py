@@ -112,7 +112,7 @@ def expected_counts(http: Http, params: dict,
             if m and n:
                 counts[m.group(1)] = int(n.group(0))
         return counts
-    except Exception as exc:  # fail open: the check must not break the run
+    except Exception as exc:  # noqa: BLE001 — fail open: the check must not break the run
         print(f"[eba] count endpoint unavailable ({exc}) — continuing without",
               file=sys.stderr)
         return {}

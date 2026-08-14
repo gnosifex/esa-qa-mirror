@@ -135,7 +135,7 @@ def _fetch_first(adapter, http, urls):
     for u in urls[:-1]:
         try:
             return adapter.fetch_record(http, u)
-        except Exception:
+        except Exception:  # noqa: BLE001, S112 — any failure means: try the next candidate
             continue
     return adapter.fetch_record(http, urls[-1])
 
@@ -186,11 +186,9 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             totals[auth]["enumerated"] += 1
             in_window = (row.get("date_publication") or "") >= mode["window_start"]
             entries.append((key, in_window, row))
-        n = 0
-        for _, _, row in _select(entries, state, mode):
+        for n, (_, _, row) in enumerate(_select(entries, state, mode)):
             if args.limit and n >= args.limit:
                 break
-            n += 1
             auth = row["authority"]
             tag = f"{auth}:{act_name}"
             try:
@@ -227,7 +225,7 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 state.mark_verified(state.key(rec), _now())
                 totals[auth]["checked"] += 1
                 _write_delta(root, state, rec, args, totals, auth, tag)
-            except Exception as exc:  # one bad detail page must not stop the run
+            except Exception as exc:  # noqa: BLE001 — one bad detail page must not stop the run
                 totals[auth]["errors"] += 1
                 complete[auth] = False
                 print(f"[{tag}] ERROR {row['link']}: {exc}", file=sys.stderr)
@@ -295,7 +293,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
                           "ignored the date facet; relying on the verification "
                           "queue", file=sys.stderr)
                     win = set()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — fail open onto the verification queue
             print(f"[eba] window listing failed ({exc}) — relying on the "
                   "verification queue", file=sys.stderr)
     entries = []
@@ -310,7 +308,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
             if args.limit and listed >= args.limit:
                 complete["eba"] = False
                 break
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — fail closed: no listing, no delisting
         print(f"[eba] LISTING FAILED: {exc}", file=sys.stderr)
         totals["eba"]["errors"] += 1
         complete["eba"] = False
@@ -337,7 +335,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
             state.mark_verified(state.key(rec), _now())
             totals["eba"]["checked"] += 1
             _write_delta(root, state, rec, args, totals, "eba", "eba")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — one bad detail page must not stop the run
             totals["eba"]["errors"] += 1
             complete["eba"] = False
             print(f"[eba] ERROR {url}: {exc}", file=sys.stderr)
@@ -366,7 +364,7 @@ def _delist(http, root, state, cfg, args, totals, seen, complete, today):
             try:
                 slugs = eba.list_archive_slugs(http, cfg["eba"])
                 archived = {k for k in missing if k.split(":", 1)[1] in slugs}
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 # Unresolvable archive → cannot classify the missing records;
                 # fail closed for this authority instead of guessing.
                 print(f"[eba] ARCHIVE LOOKUP FAILED: {exc} — delisting skipped",

@@ -1,7 +1,6 @@
-from qa_mirror import eba, eiopa, esma
-
 from conftest import FakeHttp
 
+from qa_mirror import eba, eiopa, esma
 
 # --- EBA (sectoral banking discovery + detail parse) --------------------------
 

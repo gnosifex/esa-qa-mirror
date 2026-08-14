@@ -31,7 +31,6 @@ import time
 import requests
 
 from . import eba, eiopa, esma
-
 from .common import USER_AGENT
 
 # From the embed URL app.powerbi.com/view?r=<base64 {"k":key,"t":tenant,"c":9}>.

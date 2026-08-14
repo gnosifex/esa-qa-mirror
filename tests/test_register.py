@@ -188,8 +188,8 @@ def test_synth_links_per_authority():
     assert register.synth_links({
         "authority": "eiopa", "native_id": "2734 - DORA003", "joint_id": "DORA003",
         "link": "n/a",
-    }) == ["https://www.eiopa.europa.eu/qa-regulation/"
-           "questions-and-answers-database/2734-dora003_en"]
+    }) == [("https://www.eiopa.europa.eu/qa-regulation/"
+            "questions-and-answers-database/2734-dora003_en")]
     assert register.synth_links(
         {"authority": "esma", "native_id": "2103", "joint_id": "DORA050",
          "link": "-"},

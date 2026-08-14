@@ -135,7 +135,7 @@ def iter_listing(http: Http, page_url, href_re: str, max_pages: int, tag: str):
             try:
                 links = set(re.findall(href_re, http.get(url + bust).text))
                 new = links - seen
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass  # the retry is best-effort; the stale counter decides
         if not new:
             stale += 1
@@ -183,7 +183,7 @@ def iso_date(value: str) -> str:
     v = (value or "").strip()
     for fmt in _DATE_FORMATS:
         try:
-            return datetime.strptime(v, fmt).date().isoformat()
+            return datetime.strptime(v, fmt).date().isoformat()  # noqa: DTZ007 — portal dates carry no zone; only .date() is used
         except ValueError:
             continue
     return ""
@@ -228,7 +228,7 @@ class Record:
         base = (self.legal_act or "").split("-")[0].strip().lower()
         return re.sub(r"[^a-z0-9]+", "-", base) or "unsorted"
 
-    def finalize(self, params: dict) -> "Record":
+    def finalize(self, params: dict) -> Record:
         """Derive the structured legal-act fields from the portal string, falling
         back to the authority's configured default (portals differ wildly here —
         ESMA e.g. exposes no legal-act field on the detail page at all)."""
@@ -304,16 +304,18 @@ class Record:
             "",
             "---",
             "",
-            "> **Disclaimer.** Unofficial, automatically generated mirror copy — "
-            "no guarantee and no liability is accepted for accuracy, completeness "
-            "or timeliness; conversion errors are possible. Q&A answers speak as "
-            "of their publication date: they refer to the legal acts in force at "
-            "that time, and the authorities do not systematically revisit "
-            "published Q&As after subsequent changes to the underlying "
-            "legislation. Before any use or "
-            f"reliance, verify against the original: <{self.source_url}> — "
-            "the authority's portal version prevails. Content © the respective "
-            "authority; reuse subject to its legal notice.",
+            (
+                "> **Disclaimer.** Unofficial, automatically generated mirror copy — "
+                "no guarantee and no liability is accepted for accuracy, completeness "
+                "or timeliness; conversion errors are possible. Q&A answers speak as "
+                "of their publication date: they refer to the legal acts in force at "
+                "that time, and the authorities do not systematically revisit "
+                "published Q&As after subsequent changes to the underlying "
+                "legislation. Before any use or "
+                f"reliance, verify against the original: <{self.source_url}> — "
+                "the authority's portal version prevails. Content © the respective "
+                "authority; reuse subject to its legal notice."
+            ),
             "",
         ]
         return "\n".join(fm + body)
@@ -321,7 +323,7 @@ class Record:
     def content_hash(self) -> str:
         # retrieved_at is excluded: a fresh fetch of unchanged content must not
         # count as a change, or every delta run would rewrite every record.
-        md = re.sub(r"^retrieved_at: .*\n", "", self.to_markdown(), flags=re.M)
+        md = re.sub(r"^retrieved_at: .*\n", "", self.to_markdown(), flags=re.MULTILINE)
         return hashlib.sha256(md.encode()).hexdigest()[:16]
 
 
@@ -409,14 +411,14 @@ def mark_file_gone(root: Path, key: str, date_iso: str, field: str) -> Path | No
     authority, slug = key.split(":", 1)
     for f in sorted((root / "data").glob(f"*/{authority}-{slug}.md")):
         text = f.read_text(encoding="utf-8")
-        if re.search(r"^x_(delisted|archived): ", text, flags=re.M):
+        if re.search(r"^x_(delisted|archived): ", text, flags=re.MULTILINE):
             return None
         new = re.sub(
             r"^source_url: ",
             f'x_{field}: "{date_iso}"\nsource_url: ',
             text,
             count=1,
-            flags=re.M,
+            flags=re.MULTILINE,
         )
         if new == text:
             return None

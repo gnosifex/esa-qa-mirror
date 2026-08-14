@@ -1,4 +1,5 @@
 import pytest
+from conftest import FakeHttp
 
 from qa_mirror.common import (
     DELISTED_HASH_PREFIX,
@@ -14,9 +15,6 @@ from qa_mirror.common import (
     record_path,
     write_record,
 )
-
-from conftest import FakeHttp
-
 
 # --- html_to_text -----------------------------------------------------------
 
@@ -90,11 +88,11 @@ def test_format_joint_id():
 # --- Record markdown / hashing ----------------------------------------------
 
 def make_record(**kw):
-    base = dict(
-        authority="eba", qa_id="2024_1", source_url="https://example.org/1",
-        legal_act="DORA", question="Q?", answer="A.",
-        dates={"submission_date": "20/05/2024"},
-    )
+    base = {
+        "authority": "eba", "qa_id": "2024_1", "source_url": "https://example.org/1",
+        "legal_act": "DORA", "question": "Q?", "answer": "A.",
+        "dates": {"submission_date": "20/05/2024"},
+    }
     base.update(kw)
     return Record(**base)
 
@@ -267,7 +265,7 @@ def test_iter_listing_survives_one_empty_page():
 def test_iter_listing_cache_busted_retry_rescues_shell_page(monkeypatch):
     # A barren page that is really a stale cache node serving the JS shell:
     # the cache-busted retry of the same page must recover the links.
-    import qa_mirror.common as common
+    from qa_mirror import common
     monkeypatch.setattr(common.time, "time", lambda: 42)
     http = FakeHttp({0: page("a"), 1: "<html>shell</html>",
                      "1?cachebust=42": page("b"), 2: page("c"),
@@ -283,5 +281,5 @@ def test_iter_listing_raises_when_max_pages_exhausted():
     got = []
     with pytest.raises(ListingTruncated):
         for u in iter_listing(http, lambda p: p, r'href="(/qa/[^"]+)"', 2, "t"):
-            got.append(u)
+            got.append(u)  # noqa: PERF402 — list() would drop what was yielded before the raise
     assert got == ["/qa/a", "/qa/b"]

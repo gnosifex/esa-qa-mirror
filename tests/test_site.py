@@ -2,17 +2,21 @@ import json
 
 from qa_mirror import site
 from qa_mirror.common import (
-    Record, State, mark_file_delisted, mark_file_gone, write_record,
+    Record,
+    State,
+    mark_file_delisted,
+    mark_file_gone,
+    write_record,
 )
 
 
 def rec(authority, qa_id, legal_act, **kw):
-    base = dict(
-        authority=authority, qa_id=qa_id, legal_act=legal_act,
-        source_url=f"https://example.org/{authority}/{qa_id}",
-        question="What is asked?", answer="What is answered.",
-        status="Final Q&A", retrieved_at="2026-07-08T00:00:00+00:00",
-    )
+    base = {
+        "authority": authority, "qa_id": qa_id, "legal_act": legal_act,
+        "source_url": f"https://example.org/{authority}/{qa_id}",
+        "question": "What is asked?", "answer": "What is answered.",
+        "status": "Final Q&A", "retrieved_at": "2026-07-08T00:00:00+00:00",
+    }
     base.update(kw)
     return Record(**base)
 

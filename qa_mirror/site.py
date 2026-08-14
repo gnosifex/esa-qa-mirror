@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-_ART_PREFIX_RE = re.compile(r"^\s*art(?:icle|\.)?\s+", re.I)
+_ART_PREFIX_RE = re.compile(r"^\s*art(?:icle|\.)?\s+", re.IGNORECASE)
 
 
 def _article(v) -> str:
@@ -26,12 +26,12 @@ def _article(v) -> str:
 
 # First ---…--- pair only: a "---" inside the body (ESMA answers separate
 # accordion parts with it) must not shift the frontmatter boundary.
-_FM_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.S)
-_Q_RE = re.compile(r"## Question\n(.*?)\n## (?:Background|Answer)", re.S)
-_B_RE = re.compile(r"## Background\n(.*?)\n## Answer", re.S)
+_FM_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+_Q_RE = re.compile(r"## Question\n(.*?)\n## (?:Background|Answer)", re.DOTALL)
+_B_RE = re.compile(r"## Background\n(.*?)\n## Answer", re.DOTALL)
 # The answer ends at the disclaimer separator, not at any "---" — multi-part
 # ESMA answers contain "---" between accordion blocks.
-_A_RE = re.compile(r"## Answer\n(.*?)(?:\n---\n\n> \*\*Disclaimer\.\*\*|\Z)", re.S)
+_A_RE = re.compile(r"## Answer\n(.*?)(?:\n---\n\n> \*\*Disclaimer\.\*\*|\Z)", re.DOTALL)
 
 
 def build(root: Path) -> int:

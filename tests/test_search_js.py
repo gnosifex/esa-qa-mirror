@@ -69,5 +69,5 @@ def test_search_core(tmp_path):
     core = html[html.index(BEGIN):html.index(END)]
     script = tmp_path / "search_core_test.js"
     script.write_text(core + ASSERTIONS, encoding="utf-8")
-    run = subprocess.run(["node", str(script)], capture_output=True, text=True)
+    run = subprocess.run(["node", str(script)], capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stderr
