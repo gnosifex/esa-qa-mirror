@@ -16,7 +16,8 @@ date_submission_to_esas: "2025-07-25"
 date_submission_to_esas_iso: "2025-07-25"
 x_answered_by: "Joint ESAs"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora-253-3393_en"
-retrieved_at: "2026-07-09T12:23:28+00:00"
+license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
+retrieved_at: "2026-08-20T15:15:16+00:00"
 ---
 
 # EIOPA Q&A DORA 253 - 3393

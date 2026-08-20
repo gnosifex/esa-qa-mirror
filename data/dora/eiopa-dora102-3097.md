@@ -16,7 +16,8 @@ date_submission_to_esas: "2024-05-27"
 date_submission_to_esas_iso: "2024-05-27"
 x_answered_by: "European Commission"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora102-3097_en"
-retrieved_at: "2026-07-17T06:26:32+00:00"
+license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
+retrieved_at: "2026-08-20T15:13:55+00:00"
 ---
 
 # EIOPA Q&A DORA102 - 3097

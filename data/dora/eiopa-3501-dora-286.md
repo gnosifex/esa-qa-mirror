@@ -16,7 +16,8 @@ date_submission_to_esas: "2026-01-26"
 date_submission_to_esas_iso: "2026-01-26"
 x_answered_by: "EIOPA"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/3501-dora-286_en"
-retrieved_at: "2026-07-09T12:23:36+00:00"
+license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
+retrieved_at: "2026-08-20T15:15:29+00:00"
 ---
 
 # EIOPA Q&A 3501 - DORA 286

@@ -16,7 +16,8 @@ date_submission_to_esas: "2024-02-14"
 date_submission_to_esas_iso: "2024-02-14"
 x_answered_by: "Joint ESAs"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora033-2996_en"
-retrieved_at: "2026-07-09T12:21:49+00:00"
+license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
+retrieved_at: "2026-08-20T15:13:04+00:00"
 ---
 
 # EIOPA Q&A DORA033 - 2996
