@@ -118,6 +118,7 @@ x_…: portal-specific extras, kept verbatim
 x_delisted: "2026-07-08"              # only if the Q&A vanished without trace
 x_archived: "2026-07-08"              # only if it moved to the EBA archive tab
 source_url: "https://…"
+license: "© EBA — reuse subject to https://www.eba.europa.eu/legal-notice"
 retrieved_at: "2026-07-08T12:34:56+00:00"   # UTC timestamp of the fetch
 ---
 
@@ -142,7 +143,14 @@ The first block of frontmatter keys (`authority` … `status`, `source_url`) is 
 - **Answers speak as of their publication date.** They interpret the legal acts in force at that time, and the authorities do not systematically revisit published Q&As after subsequent changes to the underlying legislation — check whether the cited provisions have since been amended. The publication date is on every record and search result.
 - **Scrapers break.** The adapters parse the current portal HTML, and the register client reverse-engineers PowerBI's undocumented backend (both verified 2026-07-09). Frontend/backend changes will break the affected piece; each detail fetch fails independently without stopping the others, a failed register query fails closed (no delisting), and the CLI exit code/summary shows errors. Fixes are local to one small module.
 - **Be polite.** Requests are rate-limited (`delay_seconds`, default 1.5 s) and the User-Agent identifies the tool. Keep it that way.
-- Content of the mirrored Q&As © the respective authorities (EBA/EIOPA/ESMA); reuse subject to their legal notices — [EBA legal notice](https://www.eba.europa.eu/legal-notice) · [EIOPA legal notice](https://www.eiopa.europa.eu/legal-notice_en) · [ESMA legal notice](https://www.esma.europa.eu/legal-notice). Every mirrored record carries its own disclaimer and source link. This repository's code is MIT-licensed.
+- Content of the mirrored Q&As © the respective authorities (EBA/EIOPA/ESMA); reuse subject to their legal notices — [EBA legal notice](https://www.eba.europa.eu/legal-notice) · [EIOPA legal notice](https://www.eiopa.europa.eu/legal-notice_en) · [ESMA legal notice](https://www.esma.europa.eu/legal-notice). Every mirrored record carries its own disclaimer and source link. See [License](#license).
+
+## License
+
+Licensing is split in two:
+
+- **Code** — `qa_mirror/`, `tests/`, the search page (`docs/`), workflows and configuration — is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): use, modify and share freely for noncommercial purposes, keeping the copyright notice intact. **Commercial use requires prior permission** from the author.
+- **Mirrored content** (`data/`) — © the respective authority (EBA / EIOPA / ESMA), reproduced under and subject to their legal notices; see [NOTICE](NOTICE). The code license grants no rights in this content.
 
 ## Layout
 

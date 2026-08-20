@@ -201,6 +201,17 @@ def format_joint_id(token: str, num: int) -> str:
     return fmt.format(token=token, num=num)
 
 
+# Rights statement per authority, mirrored into every record's frontmatter —
+# the machine-readable twin of the NOTICE file: the mirrored content is the
+# authority's, and its reuse follows the authority's legal notice, not this
+# repository's code license.
+LEGAL_NOTICES = {
+    "eba": "https://www.eba.europa.eu/legal-notice",
+    "eiopa": "https://www.eiopa.europa.eu/legal-notice_en",
+    "esma": "https://www.esma.europa.eu/legal-notice",
+}
+
+
 @dataclass
 class Record:
     """Normalized Q&A record — one file per record under data/<authority>/."""
@@ -281,8 +292,10 @@ class Record:
                 fm.append(f"date_{k}_iso: {y(iso_date(v))}")
         for k, v in sorted(self.extra.items()):
             fm.append(f"x_{k}: {y(v)}")
+        notice = LEGAL_NOTICES.get(self.authority, "the authority's legal notice")
         fm += [
             f"source_url: {y(self.source_url)}",
+            f"license: {y(f'© {self.authority.upper()} — reuse subject to {notice}')}",
             f"retrieved_at: {y(self.retrieved_at)}",
             "---",
             "",

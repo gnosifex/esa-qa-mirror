@@ -1,0 +1,53 @@
+NOTICE — mirrored authority content (data/)
+============================================
+
+The Markdown records under data/ reproduce supervisory Q&A content
+published by the three European Supervisory Authorities:
+
+  EBA   — European Banking Authority            https://www.eba.europa.eu
+  EIOPA — European Insurance and Occupational
+          Pensions Authority                    https://www.eiopa.europa.eu
+  ESMA  — European Securities and Markets
+          Authority                             https://www.esma.europa.eu
+
+This content is © the respective authority. It is reproduced under, and
+any reuse of it remains subject to, the authorities' own legal notices:
+
+  https://www.eba.europa.eu/legal-notice
+  https://www.eiopa.europa.eu/legal-notice_en
+  https://www.esma.europa.eu/legal-notice
+
+The software license of this repository (see LICENSE) does not apply to
+data/ and grants no rights whatsoever in the mirrored content.
+
+Attribution
+-----------
+Every record names its authority and links its source page (source_url
+in the frontmatter). For content mirrored from EIOPA, per its legal
+notice: "Source: EIOPA - European Insurance and Occupational Pensions
+Authority, https://eiopa.europa.eu/".
+
+Transformation disclaimer (EIOPA / ESMA wording)
+------------------------------------------------
+The records are converted to Markdown with normalized metadata; the
+substance of question, background and answer is reproduced unchanged.
+In the words required by the EIOPA and ESMA legal notices for reused
+material: This document has been drafted using material downloaded from
+EIOPA's / ESMA's website; EIOPA / ESMA does not endorse this publication
+and in no way is liable for copyright or other intellectual property
+rights infringements nor for any damages caused to third parties through
+this publication.
+
+Unofficial, no endorsement
+--------------------------
+This is an unofficial mirror. None of the authorities endorses it; the
+authority's portal version always prevails. Q&A answers speak as of
+their publication date; the authorities do not systematically review
+published Q&As after amendments to the underlying legislation.
+
+Out of scope
+------------
+The authorities' logos and corporate identity are not used in this
+repository and remain their exclusive property. Third-party material
+and legislative texts quoted within Q&As are outside the authorities'
+copyright; legislative texts of the EU are publicly available law.

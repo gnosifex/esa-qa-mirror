@@ -109,6 +109,12 @@ def test_to_markdown_skips_iso_twin_for_unparseable_dates():
     assert "date_published_iso" not in md
 
 
+def test_to_markdown_carries_the_authority_rights_field():
+    md = make_record().to_markdown()
+    assert ('license: "© EBA — reuse subject to '
+            'https://www.eba.europa.eu/legal-notice"') in md
+
+
 def test_content_hash_ignores_retrieved_at_only():
     a = make_record(retrieved_at="2026-01-01T00:00:00+00:00")
     b = make_record(retrieved_at="2026-07-08T12:00:00+00:00")
