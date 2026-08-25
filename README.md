@@ -176,3 +176,7 @@ DORA Q&As are **Joint ESAs Q&As**: one shared corpus, answered jointly, hosted i
 Cross-portal duplicates **do occur** (e.g. joint Q&A DORA003 is published both as EIOPA "2734 - DORA003" and ESMA 2356). The mirror keeps every authority's own copy — each webtool is the source of truth for its records — and exposes the shared `joint_id` in the frontmatter (from the register, normalized to its native format, e.g. `DORA003`) as the key for deduplication and cross-checks.
 
 Occasionally the register and the receiving portal **classify the same document under different acts** — e.g. DORA138 / ESMA 2364, which the register lists under DORA (applicability of DORA to certain crypto VASPs) while ESMA's own page tags it MiCA. The register's classification wins for filing (it decides the joint set the Q&A belongs to), but the portal's differing act is preserved in `x_portal_legal_act:` so the disagreement stays visible rather than hidden.
+
+## Sibling spin-offs
+
+This mirror is one of three public spin-offs of a non-public regulatory corpus — alongside [dora-graph](https://github.com/gnosifex/dora-graph), an animated map of the DORA regulation and the documents around it, and [reg-sigel](https://github.com/gnosifex/reg-sigel), a curated registry of source sigla for EU/UK/US financial regulation.
