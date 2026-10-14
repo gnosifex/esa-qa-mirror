@@ -1,3 +1,5 @@
+from datetime import UTC
+
 import pytest
 
 from qa_mirror import cli, eba, eiopa, esma, register
@@ -343,9 +345,9 @@ def test_incremental_run_skips_recently_verified_records(root, monkeypatch):
 
 
 def test_recently_published_row_is_refetched_in_window(root, monkeypatch):
-    from datetime import datetime, timezone
+    from datetime import datetime
     rows = default_rows()
-    rows[0]["date_publication"] = datetime.now(timezone.utc).date().isoformat()
+    rows[0]["date_publication"] = datetime.now(UTC).date().isoformat()
     install(monkeypatch, rows)
     run(root)
     assert run(root) == 0
