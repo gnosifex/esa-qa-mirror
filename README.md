@@ -32,7 +32,7 @@ Two sources, one per kind of act (see `config.yaml`):
 - **Joint acts (DORA) → the Joint Q&A Register.** One query to the register's PowerBI backend returns *every* joint Q&A with its receiving authority, the authority's native detail-page id, a direct link to the answer, status, legal act and metadata. The mirror takes the rows for the wanted act and status, then fetches each linked detail page for its content. This is what makes the joint corpus *complete*: the register lists Q&As regardless of who drafted the answer (including EU-Commission-answered finals), which a per-portal search misses.
 - **Sectoral banking acts (CRD…) → the EBA's own search.** These are not Joint Q&As and have no register entry, so the EBA Single Rulebook search is paged through directly, filtered to finals.
 
-Each discovered detail page is parsed by the receiving authority's adapter (`qa_mirror/eba.py`, `eiopa.py`, `esma.py`) into a uniform `Record`. The register supplies the authoritative shared fields (joint id, status, legal act, dates); the detail page supplies question, background and answer.
+Each discovered detail page is parsed by the receiving authority's adapter (`qa_mirror/eba.py`, `eiopa.py`, `esma.py`) into a uniform `Record`. The register supplies the authoritative shared fields (joint id, status, legal act) plus its own dates as separate fields; the detail page supplies question, background, answer and — on the EBA portal — the portal's dates, which prevail over the register's (see [Dates: two sources](#dates-two-sources-the-portal-prevails)).
 
 ## Configuration
 
@@ -114,6 +114,10 @@ date_submission_date: "20/05/2024"            # portal-verbatim
 date_submission_date_iso: "2024-05-20"        # normalized twin, for sorting/filtering
 date_final_publishing_date: "08/08/2025"
 date_final_publishing_date_iso: "2025-08-08"
+date_publication_final_answer: "2025-08-08"   # register date (joint Q&As only)
+date_publication_final_answer_iso: "2025-08-08"
+date_submission_to_esas: "2024-05-20"         # register date (joint Q&As only)
+date_submission_to_esas_iso: "2024-05-20"
 x_…: portal-specific extras, kept verbatim
 x_delisted: "2026-07-08"              # only if the Q&A vanished without trace
 x_archived: "2026-07-08"              # only if it moved to the EBA archive tab
@@ -176,6 +180,19 @@ DORA Q&As are **Joint ESAs Q&As**: one shared corpus, answered jointly, hosted i
 Cross-portal duplicates **do occur** (e.g. joint Q&A DORA003 is published both as EIOPA "2734 - DORA003" and ESMA 2356). The mirror keeps every authority's own copy — each webtool is the source of truth for its records — and exposes the shared `joint_id` in the frontmatter (from the register, normalized to its native format, e.g. `DORA003`) as the key for deduplication and cross-checks.
 
 Occasionally the register and the receiving portal **classify the same document under different acts** — e.g. DORA138 / ESMA 2364, which the register lists under DORA (applicability of DORA to certain crypto VASPs) while ESMA's own page tags it MiCA. The register's classification wins for filing (it decides the joint set the Q&A belongs to), but the portal's differing act is preserved in `x_portal_legal_act:` so the disagreement stays visible rather than hidden.
+
+### Dates: two sources, the portal prevails
+
+A joint Q&A can carry two date pairs from two sources, kept side by side and never merged:
+
+| Field | Source | Format |
+|---|---|---|
+| `date_submission_date`, `date_final_publishing_date` (EBA), `date_date_of_submission` (ESMA, EIOPA) | receiving portal's detail page (EBA: "Submission date", "Final publishing date") | portal-verbatim (EBA `DD/MM/YYYY`), `_iso` twin parsed from it |
+| `date_submission_to_esas`, `date_publication_final_answer` | Joint Q&A Register (PowerBI date columns) | ISO already, `_iso` twin identical |
+
+The register pair is only filled for joint Q&As; the EBA-only acts (CRD, CRR) carry the portal dates alone. The ESMA and EIOPA detail pages expose no publication date (some a submission date), so for those records the register's publication date is the only one. **Where both exist, the portal date is the authority's own statement and prevails**; the search page sorts and filters by it. The register dates are copied exactly as the register serves them — they are not re-parsed, so a mismatch is never a parsing artefact of this mirror.
+
+Mismatches occur because the register carries data-entry errors, as with its link cells above. Verified 2026-10-14 against the live register (717 rows) and the EBA portal: 7 rows date the publication *before* the submission, and several dates are day/month swaps of the portal's — e.g. EBA 2024_7047, 2024_7050 and 2024_7096 show "Final publishing date 11/12/2024" on the portal (11 December; the EBA portal writes `DD/MM/YYYY` throughout) while the register says 2024-11-12, and for EBA 2025_7297 the register's submission date 2025-08-01 is the swap of the portal's 08/01/2025. Other rows differ by a few days without a swap (EBA 2024_7098, 2024_7178, 2025_7297: portal 25/07/2025, register 2025-07-27; EBA 2025_7309: portal 14/08/2025, register 2025-08-08). For ESMA and EIOPA records the register date is the only one the mirror has — read it with that caveat.
 
 ## Sibling spin-offs
 
