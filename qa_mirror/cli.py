@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import requests
@@ -75,7 +75,7 @@ def _write_run_manifest(root: Path, args, sel, totals, mode):
 
 
 def _now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _slug_from_url(url: str) -> str:
@@ -92,7 +92,7 @@ def _run_mode(state, cfg, args) -> dict:
     sweep retries on the next run), the verification queue picks the
     oldest-checked records first (so missed days heal themselves)."""
     inc = cfg.get("incremental") or {}
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sweep_after = int(inc.get("sweep_after_days", 31))
     last_sweep = state.data.get("last_full_sweep", "")
     due = (not last_sweep
@@ -423,7 +423,7 @@ def main(argv=None) -> int:
     http = Http(delay=float(cfg.get("delay_seconds", 1.5)))
     session = requests.Session()
     state = State(root / "state.json")
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
     totals = {a: {"enumerated": 0, "seen": 0, "written": 0, "checked": 0,
