@@ -222,6 +222,21 @@ def test_http_gives_up_after_retries(monkeypatch):
     assert len(calls) == 3  # retries=2 → 3 attempts, then the 503 raises
 
 
+def test_http_retries_403_once_after_pause(monkeypatch):
+    # a bot filter's 403 (ESMA vs GitHub runners) can be momentary
+    h, calls = make_http([403, 200], monkeypatch)
+    assert h.get("https://host/x").status_code == 200
+    assert len(calls) == 2
+
+
+def test_http_gives_up_on_persistent_403(monkeypatch):
+    import requests
+    h, calls = make_http([403, 403, 403], monkeypatch)
+    with pytest.raises(requests.HTTPError):
+        h.get("https://host/x")
+    assert len(calls) == 2  # exactly one retry — a hard block is not waited out
+
+
 def test_http_does_not_retry_hard_404(monkeypatch):
     import requests
     h, calls = make_http([404], monkeypatch)

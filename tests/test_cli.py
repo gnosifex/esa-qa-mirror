@@ -380,17 +380,71 @@ def test_sweep_is_due_driven_and_self_retrying(root, monkeypatch):
     state = State(root / "state.json")
     first_sweep = state.data["last_full_sweep"]
     assert first_sweep
-    state.data["last_full_sweep"] = "2020-01-01"  # long overdue
+    state.data["last_full_sweep_by"]["esma"] = "2020-01-01"  # long overdue
     state.save()
     assert run(root) == 0
-    assert manifest_line(root, 1)["mode"] == "sweep"
-    assert State(root / "state.json").data["last_full_sweep"] == first_sweep
+    line = manifest_line(root, 1)
+    assert line["mode"] == "sweep"
+    assert line["totals"]["esma"]["checked"] == 1   # esma re-swept …
+    assert line["totals"]["eiopa"]["checked"] == 0  # … eiopa stays incremental
+    after = State(root / "state.json")
+    assert after.last_sweep("esma") == first_sweep
+    assert after.data["last_full_sweep"] == first_sweep
 
 
 def test_sweep_marker_not_set_by_limited_runs(root, monkeypatch):
     install(monkeypatch, default_rows())
     assert run(root, "--limit", "1") == 0
-    assert State(root / "state.json").data["last_full_sweep"] == ""
+    state = State(root / "state.json")
+    assert state.data["last_full_sweep"] == ""
+    assert state.data["last_full_sweep_by"] == {}
+
+
+def test_failing_authority_keeps_only_itself_in_sweep_mode(root, monkeypatch):
+    # ESMA failing (2026-10-23 on: 403 for every detail page) must not keep
+    # EBA/EIOPA in daily full-sweep mode — the sweep marker is per authority
+    install(monkeypatch, default_rows())
+
+    def forbidden(http, url):
+        raise RuntimeError("403 Client Error: Forbidden")
+    monkeypatch.setattr(esma, "fetch_record", forbidden)
+    assert run(root) == 1
+    state = State(root / "state.json")
+    assert state.last_sweep("eiopa")    # eiopa's sweep completed
+    assert state.last_sweep("esma") == ""  # esma's is still due
+    assert state.data["last_full_sweep"] == ""  # corpus not fully verified
+    assert run(root) == 1
+    line = manifest_line(root, 1)
+    assert line["totals"]["eiopa"]["checked"] == 0  # incremental now
+    assert line["totals"]["esma"]["errors"] == 1    # esma retried (sweep)
+
+
+def test_legacy_global_sweep_marker_is_honoured(root, monkeypatch):
+    from datetime import datetime
+    install(monkeypatch, default_rows())
+    today = datetime.now(UTC).date().isoformat()
+    State(root / "state.json").save()
+    import json
+    data = json.loads((root / "state.json").read_text())
+    data["last_full_sweep"] = today  # pre-split state file: no per-authority map
+    del data["last_full_sweep_by"]
+    (root / "state.json").write_text(json.dumps(data))
+    assert run(root) == 0
+    assert manifest_line(root, 0)["mode"] == "incremental"
+
+
+def test_single_authority_run_never_delists_other_authorities(root, monkeypatch):
+    install(monkeypatch, default_rows())
+    assert run(root) == 0
+    assert run(root, "--authority", "esma") == 0  # eiopa not enumerated …
+    line = manifest_line(root, 1)
+    assert line["authorities"] == ["esma"]
+    assert set(line["totals"]) == {"esma"}
+    from qa_mirror.common import DELISTED_HASH_PREFIX
+    state = State(root / "state.json")
+    eiopa_hashes = [h for k, h in state.data["records"].items() if k.startswith("eiopa:")]
+    assert len(eiopa_hashes) == 2
+    assert not any(h.startswith(DELISTED_HASH_PREFIX) for h in eiopa_hashes)  # … so never delisted
 
 
 def test_unfiltered_window_listing_is_distrusted(tmp_path, monkeypatch):
@@ -437,3 +491,21 @@ def test_giant_window_distrusted_even_when_count_endpoint_lies(tmp_path, monkeyp
     import json
     line = json.loads((tmp_path / "runs.jsonl").read_text().splitlines()[1])
     assert line["totals"]["eba"]["checked"] == 0  # cap discarded the window
+
+
+def test_retry_plan_repeats_only_authorities_whose_latest_run_failed(tmp_path):
+    import json
+
+    from qa_mirror.retry_plan import failed_authorities
+    runs = tmp_path / "runs.jsonl"
+    assert failed_authorities(runs) == []  # no history → nothing to retry
+    lines = [
+        # pre-split all-authorities run: esma and eba failed
+        {"authorities": ["eba", "eiopa", "esma"],
+         "totals": {"eba": {"errors": 1}, "eiopa": {"errors": 0}, "esma": {"errors": 11}}},
+        # later single-authority runs: eba recovered, esma still failing
+        {"authorities": ["eba"], "totals": {"eba": {"errors": 0}}},
+        {"authorities": ["esma"], "totals": {"esma": {"errors": 11}}},
+    ]
+    runs.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    assert failed_authorities(runs) == ["esma"]

@@ -2,8 +2,16 @@ name: mirror
 
 on:
   schedule:
-    - cron: "17 4 * * *"   # daily 04:17 UTC — the run is idempotent, and a
-                             # daily delta caps worst-case latency at ~1 day
+    # Nightly main run (all authorities) — the run is idempotent, and a daily
+    # delta caps worst-case latency at ~1 day. Quiet hours on purpose: since
+    # 2026-10-23 ESMA answered the (GitHub-delayed, ~09–11 UTC) daytime runs
+    # with 403 on every detail page, while a 22:38 UTC probe got through.
+    - cron: "17 22 * * *"
+    # Retry runs at other times of day: they repeat only the authorities whose
+    # latest run failed (qa_mirror.retry_plan) and do nothing otherwise — so a
+    # source blocked at one time of day is probed at others.
+    - cron: "43 5 * * *"
+    - cron: "43 13 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -21,6 +29,8 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     timeout-minutes: 300   # a full CRR-scale first run needs ~1h; generous headroom
+    outputs:
+      ran: ${{ steps.plan.outputs.authorities != '' }}
     steps:
       # Pinned to full commit SHAs (repo setting "Require actions to be pinned
       # to a full-length commit SHA"). Update SHAs deliberately when bumping.
@@ -37,34 +47,74 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      # Partial failures must not lose the successful part: the mirror step is
-      # decoupled from the commit step and its outcome re-raised at the end,
-      # so the run still commits what it got but ends red on any error.
-      - name: Mirror
-        id: mirror
+      # Which authorities this run covers: all of them on the nightly run and
+      # on manual dispatch; on a retry run only those whose latest run failed.
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" != "17 22 * * *" ]; then
+            auths="$(python -m qa_mirror.retry_plan runs.jsonl)"
+          else
+            auths="esma eiopa eba"
+          fi
+          echo "authorities: ${auths:-none (nothing to retry)}"
+          echo "authorities=$auths" >> "$GITHUB_OUTPUT"
+      # One step per authority, so a failing source shows up by name and never
+      # holds back the others. Sequential on purpose: all three share
+      # state.json. Partial failures must not lose the successful part: each
+      # mirror step is decoupled from the commit step and its outcome re-raised
+      # at the end, so the run still commits what it got but ends red on any
+      # error. ESMA first — it is the one being probed at varying times of day.
+      - name: Mirror ESMA
+        id: esma
+        if: contains(steps.plan.outputs.authorities, 'esma')
         continue-on-error: true
-        run: python -m qa_mirror
+        run: python -m qa_mirror --authority esma
+      - name: Mirror EIOPA
+        id: eiopa
+        if: contains(steps.plan.outputs.authorities, 'eiopa')
+        continue-on-error: true
+        run: python -m qa_mirror --authority eiopa
+      - name: Mirror EBA
+        id: eba
+        if: contains(steps.plan.outputs.authorities, 'eba')
+        continue-on-error: true
+        run: python -m qa_mirror --authority eba
       - name: Commit changes
+        if: steps.plan.outputs.authorities != ''
+        env:
+          AUTHS: ${{ steps.plan.outputs.authorities }}
         run: |
           git config user.name "esa-qa-mirror bot"
           git config user.email "actions@users.noreply.github.com"
           git add data state.json runs.jsonl
           git diff --cached --quiet && echo "no changes" && exit 0
-          git commit -m "mirror: $(date -u +%F) delta"
+          git commit -m "mirror: $(date -u +%F) delta (${AUTHS// /, })"
           git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
       - name: Fail on mirror errors
-        if: steps.mirror.outcome == 'failure'
+        if: >-
+          steps.esma.outcome == 'failure' || steps.eiopa.outcome == 'failure'
+          || steps.eba.outcome == 'failure'
+        env:
+          ESMA: ${{ steps.esma.outcome }}
+          EIOPA: ${{ steps.eiopa.outcome }}
+          EBA: ${{ steps.eba.outcome }}
         run: |
-          echo "mirror run reported errors — see the Mirror step log and job summary"
+          echo "mirror run reported errors — ESMA: $ESMA, EIOPA: $EIOPA, EBA: $EBA"
+          echo "see the failing Mirror step's log and the job summary"
           exit 1
 
   # Rebuild + deploy the search site from the (possibly partial) fresh data.
   # Runs even when the mirror job ended red — partial results are committed
-  # and the site should reflect them.
+  # and the site should reflect them. Skipped when a retry run had nothing
+  # to retry.
   deploy:
     needs: mirror
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.mirror.outputs.ran == 'true' }}
     permissions:
       contents: read
       pages: write
