@@ -44,7 +44,7 @@ def _write_step_summary(totals: dict):
     if not path:
         return
     lines = [
-        "## Mirror run",
+        f"## Mirror run: {', '.join(totals)}",
         "",
         "| authority | enumerated | checked | written | archived | delisted | errors |",
         "|---|---:|---:|---:|---:|---:|---:|",
@@ -65,6 +65,7 @@ def _write_run_manifest(root: Path, args, sel, totals, mode):
     line = {
         "ts": _now(),
         "mode": "sweep" if mode["sweep"] else "incremental",
+        "sweep_by": {a: mode["sweep_by"][a] for a in sorted(sel)},
         "authorities": sorted(sel),
         "full": bool(args.full),
         "totals": totals,
@@ -86,21 +87,24 @@ def _slug_from_url(url: str) -> str:
     return common.slug_of(url.rstrip("/").rsplit("/", 1)[-1].removesuffix("_en"))
 
 
-def _run_mode(state, cfg, args) -> dict:
+def _run_mode(state, cfg, args, sel) -> dict:
     """Decide what this run fetches. State-driven, not calendar-driven: a full
     sweep happens whenever the last completed one is too old (so a failed
     sweep retries on the next run), the verification queue picks the
-    oldest-checked records first (so missed days heal themselves)."""
+    oldest-checked records first (so missed days heal themselves). Sweeps are
+    due per authority: a failing source keeps only itself in sweep mode."""
     inc = cfg.get("incremental") or {}
     now = datetime.now(UTC)
-    sweep_after = int(inc.get("sweep_after_days", 31))
-    last_sweep = state.data.get("last_full_sweep", "")
-    due = (not last_sweep
-           or last_sweep < (now - timedelta(days=sweep_after)).date().isoformat())
+    cutoff = (now - timedelta(days=int(inc.get("sweep_after_days", 31)))).date().isoformat()
+    sweep_by = {}
+    for auth in ADAPTERS:
+        last = state.last_sweep(auth)
+        sweep_by[auth] = bool(args.full or args.sweep or not last or last < cutoff)
     stale = now - timedelta(days=int(inc.get("verify_after_days", 7)))
     window = now - timedelta(days=int(inc.get("window_days", 14)))
     return {
-        "sweep": bool(args.full or args.sweep or due),
+        "sweep": any(sweep_by[a] for a in sel),
+        "sweep_by": sweep_by,
         "stale_before": stale.isoformat(timespec="seconds"),
         "window_start": window.date().isoformat(),
         "budget": int(inc.get("daily_verify_budget", 600)),
@@ -115,7 +119,7 @@ def _select(entries, state, mode):
     must, rest = [], []
     for e in entries:
         h = state.data["records"].get(e[0])
-        if (mode["sweep"] or h is None
+        if (mode["sweep_by"][e[0].split(":", 1)[0]] or h is None
                 or h.startswith(common.DELISTED_HASH_PREFIX) or e[1]):
             must.append(e)
         else:
@@ -266,7 +270,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
     # the publishing date on the day they appear. Best-effort: a broken date
     # facet only defers those to the verification queue (≤ verify_after_days).
     win = set()
-    if not mode["sweep"] and not args.limit:
+    if not mode["sweep_by"]["eba"] and not args.limit:
         try:
             win = {_slug_from_url(u) for u in eba.list_detail_urls(
                 http, params, published_since=mode["window_start"])}
@@ -429,26 +433,31 @@ def main(argv=None) -> int:
     totals = {a: {"enumerated": 0, "seen": 0, "written": 0, "checked": 0,
                   "archived": 0, "delisted": 0, "errors": 0} for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
-    complete = {a: True for a in ADAPTERS}
-    mode = _run_mode(state, cfg, args)
-    print(f"mode: {'full sweep' if mode['sweep'] else 'incremental'} "
-          f"(last full sweep: {state.data.get('last_full_sweep') or 'never'})")
+    # an authority this run does not cover was not enumerated — never a basis
+    # for delisting (its empty `seen` would look like everything vanished)
+    complete = {a: a in sel for a in ADAPTERS}
+    mode = _run_mode(state, cfg, args, sel)
+    for auth in sorted(sel):
+        print(f"[{auth}] mode: "
+              f"{'full sweep' if mode['sweep_by'][auth] else 'incremental'} "
+              f"(last full sweep: {state.last_sweep(auth) or 'never'})")
 
     _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen,
                   complete, mode)
     if "eba" in sel:
         _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode)
-    else:
-        complete["eba"] = False  # EBA sectoral not run → don't delist EBA
     if not args.limit:
         _delist(http, root, state, cfg, args, totals, seen, complete, today)
 
-    ok = not any(t["errors"] for t in totals.values())
-    if (mode["sweep"] and ok and not args.limit and args.authority == "all"):
-        # only a green, unrestricted, all-authorities sweep counts as "the
-        # whole corpus was verified in one pass" — anything less stays due
-        state.data["last_full_sweep"] = today
+    ok = not any(totals[a]["errors"] for a in sel)
+    if not args.limit:
+        for auth in sorted(sel):
+            # only a green, unrestricted sweep of this authority counts as
+            # "its whole corpus was verified in one pass" — else it stays due
+            if mode["sweep_by"][auth] and not totals[auth]["errors"]:
+                state.mark_swept(auth, today, ADAPTERS)
     state.save()
+    totals = {a: t for a, t in totals.items() if a in sel}
     print("\nSummary:")
     for auth, t in totals.items():
         print(f"  {auth}: {t['enumerated']} enumerated, {t['checked']} checked, "

@@ -23,9 +23,19 @@ DEFAULT_DELAY = 1.5  # seconds between requests — be polite
 class Http:
     # Transient failures (throttling, flaky origins, network blips) are retried
     # here centrally with growing backoff so adapters only ever see hard
-    # errors. 4xx other than 429 (e.g. 404) raise immediately — they are
-    # signal, not noise.
+    # errors. 4xx other than 429 and 403 (e.g. 404) raise immediately — they
+    # are signal, not noise.
     RETRYABLE = (429, 500, 502, 503, 504)
+    # 403 is retried exactly once, after a pause: since 2026-10-23 ESMA's
+    # detail pages answer GitHub-hosted runners with 403 at some times of day
+    # while serving the same URL fine at others — a bot filter, not a missing
+    # page. One slow retry rides out a short block without burning minutes on
+    # a persistent one.
+    FORBIDDEN_BACKOFF = 60
+    # response headers that identify the blocking layer (CDN/WAF), logged once
+    # per host so a block can be attributed from the run log alone
+    _DIAG_HEADERS = ("server", "via", "x-cache", "cf-ray", "x-akamai-request-id",
+                     "x-amz-cf-id", "x-iinfo", "retry-after", "date")
 
     def __init__(self, delay: float = DEFAULT_DELAY, retries: int = 3):
         self.session = requests.Session()
@@ -33,8 +43,32 @@ class Http:
         self.delay = delay
         self.retries = retries
         self._last = 0.0
+        self._diagnosed = set()  # hosts whose 403 was already diagnosed
+
+    def _diagnose_403(self, url: str, resp):
+        host = url.split("/")[2] if "://" in url else url
+        if host in self._diagnosed:
+            return
+        self._diagnosed.add(host)
+        hdrs = {k: v for k, v in resp.headers.items() if k.lower() in self._DIAG_HEADERS}
+        body = re.sub(r"\s+", " ", getattr(resp, "text", "") or "")[:300]
+        print(f"[http] 403 diagnosis for {host}: headers={hdrs} body={body!r}",
+              file=sys.stderr)
 
     def get(self, url: str, **kw) -> requests.Response:
+        try:
+            return self._get(url, **kw)
+        except requests.HTTPError as exc:
+            resp = exc.response
+            if resp is None or resp.status_code != 403:
+                raise
+            self._diagnose_403(url, resp)
+            print(f"[http] 403 for {url} — retrying once in "
+                  f"{self.FORBIDDEN_BACKOFF}s", file=sys.stderr)
+            time.sleep(self.FORBIDDEN_BACKOFF)
+            return self._get(url, **kw)
+
+    def _get(self, url: str, **kw) -> requests.Response:
         for attempt in range(self.retries + 1):
             wait = self.delay - (time.monotonic() - self._last)
             if wait > 0:
@@ -366,6 +400,21 @@ class State:
         self.data.setdefault("records", {})
         self.data.setdefault("verified_at", {})
         self.data.setdefault("last_full_sweep", "")
+        self.data.setdefault("last_full_sweep_by", {})
+
+    def last_sweep(self, authority: str) -> str:
+        """Date of the authority's last completed full sweep. Tracked per
+        authority so one failing source cannot keep the others in sweep mode;
+        state files from before the split fall back to the global marker."""
+        return (self.data["last_full_sweep_by"].get(authority)
+                or self.data.get("last_full_sweep", ""))
+
+    def mark_swept(self, authority: str, day: str, authorities):
+        """Stamp a completed sweep for `authority`; the global
+        last_full_sweep (shown on the search page) stays the oldest of all
+        `authorities` — the date by which the whole corpus was verified."""
+        self.data["last_full_sweep_by"][authority] = day
+        self.data["last_full_sweep"] = min(self.last_sweep(a) for a in authorities)
 
     def key(self, rec: Record) -> str:
         return f"{rec.authority}:{rec.slug()}"
