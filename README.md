@@ -83,7 +83,7 @@ Then run `python -m qa_mirror` once for the initial corpus.
 
 ## Scheduled runs
 
-`.github/workflows/mirror.yml` runs nightly and commits new/changed records. Each run's diff **is** your "what's new" report. Every receiving authority (ESMA, EIOPA, EBA) runs as its own step (`--authority …`), so a failing source shows up by name and never holds back the others. Any adapter error — or a failed register query — turns the run red (the successful part is still committed); the per-source counts land in the job summary. Two retry runs at other times of day repeat only the authorities whose latest run failed (`python -m qa_mirror.retry_plan`), so a source that blocks at one time of day is retried at others; with nothing to retry they do nothing. A `403` is retried once after a pause, and the first `403` per host logs the response headers, so a bot filter can be told apart from a missing page.
+`.github/workflows/mirror.yml` runs daily and commits new/changed records. Each run's diff **is** your "what's new" report. Every receiving authority (ESMA, EIOPA, EBA) runs as its own step (`--authority …`), so a failing source shows up by name and never holds back the others. Any adapter error — or a failed register query — turns the run red (the successful part is still committed); the per-source counts land in the job summary. Two retry runs at other times of day repeat only the authorities whose latest run failed (`python -m qa_mirror.retry_plan`), so a temporarily failing source is retried the same day; with nothing to retry they do nothing. A `403` is retried once after a pause, and the first `403` per host logs the response headers, so a bot filter can be told apart from a missing page.
 
 **Runs are incremental and state-driven** (`incremental:` in `config.yaml`). Every run enumerates the register and the EBA listing pages *in full* — presence/absence, delisting, archive resolution and the count checks happen daily. Detail pages are only fetched for (a) new or reappearing records, (b) anything published in the last `window_days` (via the EBA date facet / the register's publication dates), and (c) the records whose content was verified longest ago, oldest first, up to `daily_verify_budget` — so every record is re-verified within `verify_after_days`, and a missed day heals itself because the queue is driven by per-record verification age, not by the calendar. A **full sweep** (every detail page in one pass) runs whenever the last completed one is older than `sweep_after_days` — tracked per authority, so one failing source keeps only itself in sweep mode; a failed sweep is simply still due and retries on the next run. The search page shows the resulting guarantees: presence checked daily, oldest content verification, date of the last full sweep.
 
@@ -167,7 +167,7 @@ state.json              delta-run state (committed)
 runs.jsonl              one JSON line per full mirror run — the audit trail (committed)
 tests/                  pytest suite (fixture HTML per portal + unit tests)
 docs/                   search page (index.html committed; JSON index generated at deploy)
-.github/workflows/      nightly mirror run (mirror.yml), search-site deploy (pages.yml),
+.github/workflows/      daily mirror run (mirror.yml), search-site deploy (pages.yml),
                         tests/lint (ci.yml), network probe (probe.yml)
 ```
 

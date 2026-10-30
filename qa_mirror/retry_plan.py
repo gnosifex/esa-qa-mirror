@@ -1,9 +1,9 @@
 """python -m qa_mirror.retry_plan — authorities a retry run should repeat.
 
-The mirror workflow runs every authority nightly and schedules retry runs at
-other times of day. A retry repeats only the authorities whose most recent
-run (per runs.jsonl) ended with errors — so a source that is blocked at one
-time of day gets probed at another, without re-running the healthy ones.
+The mirror workflow runs every authority once a day and schedules retry runs
+at other times of day. A retry repeats only the authorities whose most recent
+run (per runs.jsonl) ended with errors — so a temporarily failing source is
+retried the same day, without re-running the healthy ones.
 Prints the authorities space-separated (empty: nothing to retry).
 """
 from __future__ import annotations

@@ -2,14 +2,14 @@ name: mirror
 
 on:
   schedule:
-    # Nightly main run (all authorities) — the run is idempotent, and a daily
-    # delta caps worst-case latency at ~1 day. Quiet hours on purpose: since
-    # 2026-10-23 ESMA answered the (GitHub-delayed, ~09–11 UTC) daytime runs
-    # with 403 on every detail page, while a 22:38 UTC probe got through.
+    # Daily main run (all authorities) — the run is idempotent, and a daily
+    # delta caps worst-case latency at ~1 day. GitHub starts scheduled runs
+    # late (observed: up to ~6h), so the actual time of day varies anyway.
     - cron: "17 22 * * *"
     # Retry runs at other times of day: they repeat only the authorities whose
     # latest run failed (qa_mirror.retry_plan) and do nothing otherwise — so a
-    # source blocked at one time of day is probed at others.
+    # temporarily failing source (e.g. ESMA's 403s on 2026-10-23..29) is
+    # retried the same day instead of waiting for the next main run.
     - cron: "43 5 * * *"
     - cron: "43 13 * * *"
   workflow_dispatch: {}
@@ -47,7 +47,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      # Which authorities this run covers: all of them on the nightly run and
+      # Which authorities this run covers: all of them on the daily main run and
       # on manual dispatch; on a retry run only those whose latest run failed.
       - name: Plan
         id: plan
