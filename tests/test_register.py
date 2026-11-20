@@ -108,6 +108,20 @@ def test_discover_filters_act_status_authority_and_link(monkeypatch):
     assert register.discover(object(), "MiCA", {"Final"}, {"esma"}) == []
 
 
+def test_discover_flags_unknown_statuses(monkeypatch):
+    # row A is Final, row B Rejected: with Rejected ignored, nothing unknown;
+    # with nothing ignored, row B comes back flagged instead of vanishing
+    monkeypatch.setattr(register, "_pbi", _fake_pbi)
+    auths = {"eba", "eiopa", "esma"}
+    picked = register.discover(object(), "DORA", {"Final"}, auths,
+                               ignore=[" rejected "])
+    assert [r["joint_id"] for r in picked] == ["DORA001"]
+    picked = register.discover(object(), "DORA", {"Final"}, auths, ignore=[])
+    by_id = {r["joint_id"]: r for r in picked}
+    assert not by_id["DORA001"].get("unknown_status")
+    assert by_id["DORA002"]["unknown_status"] is True
+
+
 class _Resp:
     def __init__(self, status, body=None):
         self.status_code = status
@@ -167,8 +181,9 @@ def test_discover_repairs_rows_without_http_link(monkeypatch):
     a = by_id["DORA001"]
     assert a["link"] == ("https://www.eiopa.europa.eu/qa-regulation/"
                          "questions-and-answers-database/2622-dora001_en")
-    assert a["link_alts"] == [("https://www.eiopa.europa.eu/qa-regulation/"
-                               "questions-and-answers-database/dora001-2622_en")]
+    base = "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database"
+    assert a["link_alts"] == [f"{base}/dora001-2622_en", f"{base}/2622-dora-001_en",
+                              f"{base}/dora-001-2622_en"]
     # ESMA row: numeric native id is the whole detail path
     b = by_id["DORA002"]
     assert b["link"] == "https://www.esma.europa.eu/publications-data/questions-answers/2103"
@@ -190,6 +205,13 @@ def test_synth_links_per_authority():
         "link": "n/a",
     }) == [("https://www.eiopa.europa.eu/qa-regulation/"
             "questions-and-answers-database/2734-dora003_en")]
+    # EIOPA bare native id → both orders, joint id with and without hyphen
+    # (DORA261 lives at dora-261-3416_en; the plain guesses 404)
+    base = "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database"
+    assert register.synth_links({
+        "authority": "eiopa", "native_id": "3416", "joint_id": "DORA261", "link": "",
+    }) == [f"{base}/3416-dora261_en", f"{base}/dora261-3416_en",
+           f"{base}/3416-dora-261_en", f"{base}/dora-261-3416_en"]
     assert register.synth_links(
         {"authority": "esma", "native_id": "2103", "joint_id": "DORA050",
          "link": "-"},

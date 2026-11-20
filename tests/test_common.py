@@ -214,6 +214,36 @@ def test_http_retries_transient_errors(monkeypatch):
     assert len(calls) == 3
 
 
+def test_http_retries_429_with_fractional_retry_after(monkeypatch):
+    # EIOPA's CloudFront answers 429 with "Retry-After: 0.000" — must back off
+    # and retry, not crash in int() (mirror runs red since 2026-11-17)
+    from qa_mirror import common as c
+    sleeps = []
+    h, calls = make_http([429, 200], monkeypatch)
+    monkeypatch.setattr(c.time, "sleep", sleeps.append)
+    orig = h.session.get
+
+    def get(url, **kw):
+        resp = orig(url, **kw)
+        if resp.status_code == 429:
+            resp.headers["Retry-After"] = "0.000"
+        return resp
+
+    h.session.get = get
+    assert h.get("u").status_code == 200
+    assert len(calls) == 2
+    assert sleeps == [15]  # zero delay → our own backoff
+
+
+@pytest.mark.parametrize("value, expected", [
+    (None, 0), ("", 0), ("0.000", 0), ("7", 7), ("1.2", 2), ("junk", 0),
+    ("Wed, 21 Oct 2015 07:28:00 GMT", 0),  # a date in the past → no wait
+])
+def test_retry_after_seconds(value, expected):
+    from qa_mirror.common import _retry_after_seconds
+    assert _retry_after_seconds(value) == expected
+
+
 def test_http_gives_up_after_retries(monkeypatch):
     import requests
     h, calls = make_http([503, 503, 503], monkeypatch)

@@ -46,13 +46,14 @@ def _write_step_summary(totals: dict):
     lines = [
         f"## Mirror run: {', '.join(totals)}",
         "",
-        "| authority | enumerated | checked | written | archived | delisted | errors |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        ("| authority | enumerated | checked | written | archived | delisted "
+         "| pending | errors |"),
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for auth, t in totals.items():
         lines.append(
             f"| {auth} | {t['enumerated']} | {t['checked']} | {t['written']} "
-            f"| {t['archived']} | {t['delisted']} | {t['errors']} |"
+            f"| {t['archived']} | {t['delisted']} | {t['pending']} | {t['errors']} |"
         )
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -120,7 +121,8 @@ def _select(entries, state, mode):
     for e in entries:
         h = state.data["records"].get(e[0])
         if (mode["sweep_by"][e[0].split(":", 1)[0]] or h is None
-                or h.startswith(common.DELISTED_HASH_PREFIX) or e[1]):
+                or h.startswith((common.DELISTED_HASH_PREFIX,
+                                 common.PORTAL_STATUS_HASH_PREFIX)) or e[1]):
             must.append(e)
         else:
             rest.append(e)
@@ -130,6 +132,70 @@ def _select(entries, state, mode):
     take = stale[:max(0, mode["budget"])]
     mode["budget"] -= len(take)
     return must + take
+
+
+# Status vocabulary (config.yaml: register_statuses / portal_statuses; these
+# defaults apply when the config has none). Every status a source shows must
+# be known: a new one is reported as an error — the run goes red and nothing
+# of that authority is delisted — until it is added to the config, instead of
+# being filtered out (or held back) in silence.
+#
+# Portal wordings, verified live 2026-11: final — EBA "Final Q&A", ESMA
+# "Answer Published", EIOPA "Final"; not final — EIOPA "Under Review".
+# "Revised" (a revised final answer) counts as final: Final vs Revised is no
+# disagreement. The record keeps the portal's wording verbatim.
+DEFAULT_PORTAL_FINAL = ["Final", "Final Q&A", "Answer Published", "Revised"]
+DEFAULT_PORTAL_NOT_FINAL = ["Under Review"]
+
+
+def _status_vocab(cfg) -> dict:
+    """Normalized status sets from the config. `register_ignore` is None when
+    the config declares none (then unknown register statuses go undetected)."""
+    reg = cfg.get("register_statuses") or {}
+    por = cfg.get("portal_statuses") or {}
+    norm = register.norm_status
+    return {
+        "register_ignore": (None if "ignore" not in reg
+                            else {norm(x) for x in reg.get("ignore") or []}),
+        "final": {norm(x) for x in por.get("final", DEFAULT_PORTAL_FINAL)},
+        "not_final": {norm(x) for x in por.get("not_final", DEFAULT_PORTAL_NOT_FINAL)},
+    }
+
+
+def _status_class(status: str, vocab: dict) -> str:
+    """'final', 'not_final' or 'unknown' — per the configured vocabulary."""
+    s = register.norm_status(status)
+    if s in vocab["final"]:
+        return "final"
+    return "not_final" if s in vocab["not_final"] else "unknown"
+
+
+def _same_status(a: str, b: str, vocab: dict) -> bool:
+    """Same wording, or both a final answer (portal "Answer Published" vs
+    register "Final", or Revised vs Final) — not a disagreement."""
+    na, nb = register.norm_status(a), register.norm_status(b)
+    return na == nb or (_status_class(a, vocab) == _status_class(b, vocab) == "final")
+
+
+def _hold_back(root, state, rec, totals, auth, tag) -> None:
+    """A register-listed Q&A whose portal page is not final (e.g. register
+    "Final", EIOPA page "Under Review"): only final answers are mirrored, so a
+    new one is not written — it is not in state.json, so every run re-checks
+    it and it appears once the portal is final. An already mirrored one keeps
+    its file, marked x_portal_status, and is re-checked every run until the
+    portal is final again (then rewritten, which clears the marker). Neither
+    is an error: the source is inconsistent, not the mirror broken."""
+    key = state.key(rec)
+    totals[auth]["pending"] += 1
+    if key in state.data["records"]:
+        state.mark_verified(key, _now())
+        path = common.mark_file_portal_status(root, key, rec.status)
+        state.mark_portal_status(key)
+        what = f"marked {path.relative_to(root)}" if path else "already marked"
+        print(f"[{tag}] portal status {rec.status!r} for mirrored {key} → {what}")
+    else:
+        print(f"[{tag}] pending {key}: portal status {rec.status!r} "
+              f"(register: {rec.extra.get('register_status', '')!r}) — not written")
 
 
 def _fetch_first(adapter, http, urls):
@@ -162,10 +228,12 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                   mode):
     """Discover joint Q&As via the register; the register enumeration is always
     complete (presence, delisting), detail pages are fetched per _select."""
+    vocab = _status_vocab(cfg)
     for act_name, act in (cfg.get("joint_acts") or {}).items():
         statuses = set(act.get("statuses") or ["Final"])
         try:
-            rows = register.discover(session, act["register_act"], statuses, sel)
+            rows = register.discover(session, act["register_act"], statuses, sel,
+                                     ignore=vocab["register_ignore"])
         except register.RegisterError as exc:
             print(f"[register:{act_name}] DISCOVERY FAILED: {exc}", file=sys.stderr)
             for a in sel:  # cannot conclude anything is gone without the index
@@ -175,6 +243,16 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
         entries = []
         for row in rows:
             auth = row["authority"]
+            if row.get("unknown_status"):
+                # a register state nobody has decided on yet: neither mirror
+                # nor skip in silence, and conclude nothing about presence
+                print(f"[{auth}:{act_name}] ERROR: unknown register status "
+                      f"{row['status']!r} for {row['joint_id']} — add it to "
+                      "config.yaml (joint_acts.<act>.statuses to mirror, "
+                      "register_statuses.ignore to skip)", file=sys.stderr)
+                totals[auth]["errors"] += 1
+                complete[auth] = False
+                continue
             if not row["link"]:
                 # register data-entry error that not even link synthesis could
                 # fix — the record exists but is unreachable: fail visibly and
@@ -198,14 +276,22 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             try:
                 rec = _fetch_first(ADAPTERS[auth], http,
                                    [row["link"], *row.get("link_alts", [])])
-                # register metadata is authoritative for the shared/joint fields.
+                # The receiving portal is the source of truth for the record's
+                # status: the register can run ahead of (or behind) the portal
+                # (seen live: DORA261 "Final" in the register, "Under Review"
+                # on EIOPA's page). The register's value is used only when the
+                # portal shows none, and a differing one is kept visible.
+                if not rec.status:
+                    rec.status = row["status"]
+                elif row["status"] and not _same_status(rec.status, row["status"], vocab):
+                    rec.extra["register_status"] = row["status"]
+                # Joint id and legal act: the register's values win.
                 # The legal act especially: a joint Q&A can straddle acts (e.g. a
                 # DORA/MiCA VASP question), and the receiving portal may tag it by
                 # the *other* act — but the register placed it in this joint act's
                 # set, so its act string wins, keeping the record filed under the
                 # act we discovered it for rather than in data/unsorted/.
                 rec.joint_id = row["joint_id"] or rec.joint_id
-                rec.status = row["status"] or rec.status
                 if row["legal_act_raw"]:
                     portal_act = rec.legal_act_raw
                     rec.legal_act_raw = row["legal_act_raw"]
@@ -226,8 +312,20 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                     rec.dates.setdefault("publication_final_answer", row["date_publication"])
                 rec.finalize({"default_act_ref": act.get("act_ref", "")})
                 seen[auth].add(state.key(rec))  # real key, in case slug derivation drifted
-                state.mark_verified(state.key(rec), _now())
                 totals[auth]["checked"] += 1
+                cls = _status_class(rec.status, vocab)
+                if cls == "unknown":
+                    # mirrored copy (if any) stays untouched; no delisting
+                    totals[auth]["errors"] += 1
+                    complete[auth] = False
+                    print(f"[{tag}] ERROR: unknown portal status {rec.status!r} "
+                          f"for {state.key(rec)} — add it to config.yaml "
+                          "(portal_statuses.final or .not_final)", file=sys.stderr)
+                    continue
+                if cls == "not_final":
+                    _hold_back(root, state, rec, totals, auth, tag)
+                    continue
+                state.mark_verified(state.key(rec), _now())
                 _write_delta(root, state, rec, args, totals, auth, tag)
             except Exception as exc:  # noqa: BLE001 — one bad detail page must not stop the run
                 totals[auth]["errors"] += 1
@@ -249,6 +347,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
     if not params.get("legal_act_ids"):
         return
     req = str(params.get("require_status", "") or "")
+    vocab = _status_vocab(cfg)
     # Pre-flight: the portal's own count endpoint says how many finals exist —
     # the only independent completeness reference a first run has. Checks the
     # page budget up front (minute 1, not minute 50) and the discovery at the
@@ -332,6 +431,13 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
         n += 1
         try:
             rec = eba.fetch_record(http, url).finalize(params)
+            if _status_class(rec.status, vocab) == "unknown":
+                totals["eba"]["errors"] += 1
+                complete["eba"] = False
+                print(f"[eba] ERROR: unknown portal status {rec.status!r} for "
+                      f"{rec.slug()} — add it to config.yaml "
+                      "(portal_statuses.final or .not_final)", file=sys.stderr)
+                continue
             if req and req.lower() not in rec.status.lower():
                 print(f"[eba] skip {rec.slug()} (status: {rec.status!r})")
                 continue
@@ -431,7 +537,8 @@ def main(argv=None) -> int:
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
     totals = {a: {"enumerated": 0, "seen": 0, "written": 0, "checked": 0,
-                  "archived": 0, "delisted": 0, "errors": 0} for a in ADAPTERS}
+                  "archived": 0, "delisted": 0, "pending": 0, "errors": 0}
+              for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
     # an authority this run does not cover was not enumerated — never a basis
     # for delisting (its empty `seen` would look like everything vanished)
@@ -462,7 +569,8 @@ def main(argv=None) -> int:
     for auth, t in totals.items():
         print(f"  {auth}: {t['enumerated']} enumerated, {t['checked']} checked, "
               f"{t['written']} written, {t['archived']} archived, "
-              f"{t['delisted']} delisted, {t['errors']} errors")
+              f"{t['delisted']} delisted, {t['pending']} pending (portal not final), "
+              f"{t['errors']} errors")
     _write_step_summary(totals)
     if not args.limit:
         _write_run_manifest(root, args, sel, totals, mode)

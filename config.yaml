@@ -33,6 +33,25 @@ joint_acts:
     # record delisted and never mirroring the revised content.
     statuses: ["Final", "Revised"]
 
+# Status vocabulary — every status a source shows must be listed here. A
+# status that is not (a new register state, a renamed portal wording) is an
+# ERROR: the run goes red and nothing of that authority is delisted, until it
+# is added here — mirror or skip is a decision, not something to guess.
+# Comparison ignores case and surrounding/inner whitespace.
+register_statuses:
+  # Joint Q&A Register states deliberately NOT mirrored (the mirrored ones are
+  # joint_acts.<act>.statuses above). Seen live 2026-11, incl. one empty cell.
+  ignore: ["Rejected", "Withdrawn", "Deleted", "Under review",
+           "Under categorisation", ""]
+portal_statuses:
+  # Detail-page wordings of a published answer — mirrored.
+  # EBA "Final Q&A", ESMA "Answer Published", EIOPA "Final" (verified live
+  # 2026-11); "Revised" = a revised final answer (portal wording unverified).
+  final: ["Final", "Final Q&A", "Answer Published", "Revised"]
+  # Wordings of a known non-final state — held back as "pending" (not an
+  # error), a mirrored copy is kept and marked x_portal_status.
+  not_final: ["Under Review"]
+
 # EBA Single Rulebook Q&As — banking-sector acts that live solely at the EBA
 # (no Joint Q&As). Add further banking acts here as needed (config only):
 #   38 = PSD2  ·  31 = BRRD  ·  18 = MiCAR

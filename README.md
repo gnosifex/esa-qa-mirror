@@ -32,7 +32,7 @@ Two sources, one per kind of act (see `config.yaml`):
 - **Joint acts (DORA) → the Joint Q&A Register.** One query to the register's PowerBI backend returns *every* joint Q&A with its receiving authority, the authority's native detail-page id, a direct link to the answer, status, legal act and metadata. The mirror takes the rows for the wanted act and status, then fetches each linked detail page for its content. This is what makes the joint corpus *complete*: the register lists Q&As regardless of who drafted the answer (including EU-Commission-answered finals), which a per-portal search misses.
 - **Sectoral banking acts (CRD…) → the EBA's own search.** These are not Joint Q&As and have no register entry, so the EBA Single Rulebook search is paged through directly, filtered to finals.
 
-Each discovered detail page is parsed by the receiving authority's adapter (`qa_mirror/eba.py`, `eiopa.py`, `esma.py`) into a uniform `Record`. The register supplies the authoritative shared fields (joint id, status, legal act) plus its own dates as separate fields; the detail page supplies question, background, answer and — on the EBA portal — the portal's dates, which prevail over the register's (see [Dates: two sources](#dates-two-sources-the-portal-prevails)).
+Each discovered detail page is parsed by the receiving authority's adapter (`qa_mirror/eba.py`, `eiopa.py`, `esma.py`) into a uniform `Record`. The register supplies the shared fields joint id and legal act plus its own dates as separate fields; the detail page supplies question, background, answer, the **status** and — on the EBA portal — the portal's dates. Portal values prevail over the register's: the status is the portal's (the register's only fills a gap, and a differing register status is kept as `x_register_status:`), as are the dates (see [Dates: two sources](#dates-two-sources-the-portal-prevails)).
 
 ## Configuration
 
@@ -44,6 +44,12 @@ joint_acts:
     register_act: "DORA"      # matches the register's "Legal act" by substring
     act_ref: "2022/2554"      # fills legal_act_ref where a portal exposes none
     statuses: ["Final", "Revised"]   # register Status values to mirror
+
+register_statuses:            # register states deliberately not mirrored
+  ignore: ["Rejected", "Withdrawn", "Deleted", "Under review", "Under categorisation", ""]
+portal_statuses:              # detail-page wordings
+  final: ["Final", "Final Q&A", "Answer Published", "Revised"]   # mirrored
+  not_final: ["Under Review"]                                    # held back as pending
 
 eba:
   legal_act_ids: [32, 33]     # 32 = CRD · 33 = CRR; qa_legal_act[] facet values
@@ -92,6 +98,10 @@ Then run `python -m qa_mirror` once for the initial corpus.
 **Pre-flight completeness check (EBA):** before fetching anything, the run asks the portal's own count endpoint how many final Q&As exist for the configured acts, aborts red in minute one if the listing-page budget (`eba.max_pages`) can't cover them, logs the expected fetch time — and fails red if discovery ends materially below the announced count (silent truncation). Listing pages that come back empty are retried once with a cache-buster: the portals intermittently serve listings as JS-only shells from stale cache nodes.
 
 Each mirror run then calls `pages.yml`, which builds the search index from `data/` and deploys the search page as a GitHub Pages artifact (`pages.yml` also runs on relevant pushes to main). **One-time setup:** set the Pages source to "GitHub Actions" (repo Settings → Pages → Build and deployment → Source).
+
+**Only final answers are mirrored — by the portal's word.** A register row counts only if the receiving portal's own page shows a final status (EBA "Final Q&A", ESMA "Answer Published", EIOPA "Final"; "Revised" counts the same, and portal "Revised" vs register "Final" is no disagreement). When the register runs ahead of the portal (seen live: DORA261 "Final" in the register, "Under Review" on EIOPA's page), the Q&A is not written: it is counted as *pending* in the run summary — not an error — and re-checked every run until the portal is final. If an already mirrored final Q&A later shows a non-final status on the portal (e.g. a revision under way), its file is kept with the last final answer and marked `x_portal_status: "<status>"` (shown as a warning on the search page); once the portal is final again, the record is rewritten and the marker cleared. Such a change is noticed when the record is next verified (`incremental.verify_after_days`, or a full sweep).
+
+**Unknown statuses fail loudly.** Every status a source shows must be listed in `config.yaml`: register states either as mirrored (`joint_acts.<act>.statuses`) or as deliberately skipped (`register_statuses.ignore`), portal wordings as `portal_statuses.final` or `.not_final` (case and whitespace are ignored). A status in none of these lists — a new register state, a renamed portal wording — is an **error**: the run goes red, names the status and the Q&A, writes nothing for it, leaves an existing copy untouched and delists nothing of that authority. Filtering it out instead would lose new Q&As in silence and mis-mark mirrored ones as delisted. Adding the status to the config (a one-line decision: mirror or skip) turns the run green again.
 
 **Removed Q&As are never deleted, only marked:** when a complete, error-free discovery pass no longer contains a known record, the run resolves EBA records against the portal's **archive tab** first — *archived after a review* gets `x_archived: "YYYY-MM-DD"`, *vanished without trace* gets `x_delisted: "YYYY-MM-DD"` (both shown as warnings on the search page). Runs with `--limit` or with errors never mark anything. If the Q&A reappears, the record is rewritten and the marker cleared automatically. On the register side, `statuses: ["Final", "Revised"]` keeps a Q&A discovered when its final answer is revised — the revised content is mirrored instead of the record being mis-marked as delisted.
 

@@ -19,12 +19,19 @@ def row(joint, auth, native, status="Final",
 
 def fake_discover(rows):
     """Mirror register.discover's filtering over a canned row list."""
-    def discover(session, act_substr, statuses, authorities):
-        return [r for r in rows
-                if act_substr.lower() in r["legal_act_raw"].lower()
-                and r["status"] in statuses
-                and r["authority"] in authorities
-                and r["link"].startswith("http")]
+    def discover(session, act_substr, statuses, authorities, ignore=None):
+        out = []
+        for r in rows:
+            if (act_substr.lower() not in r["legal_act_raw"].lower()
+                    or r["authority"] not in authorities
+                    or not r["link"].startswith("http")):
+                continue
+            if r["status"] in statuses:
+                out.append(r)
+            elif ignore is not None and register.norm_status(r["status"]) not in {
+                    register.norm_status(x) for x in ignore}:
+                out.append({**r, "unknown_status": True})
+        return out
     return discover
 
 
@@ -100,6 +107,199 @@ def test_joint_discovery_writes_then_delta(root, monkeypatch):
     assert state.data["records"]["eiopa:2622"]  # remembered
 
 
+def portal(monkeypatch, statuses, answers=None):
+    """EIOPA fetch stub: per native id, the status (and answer) the portal shows."""
+    def eiopa_fetch(http, url):
+        nid = url.rsplit("/", 1)[-1]
+        return Record(authority="eiopa", qa_id=nid, source_url=url,
+                      status=statuses.get(nid, ""), question="Q",
+                      answer=(answers or {}).get(nid, "A"))
+    monkeypatch.setattr(eiopa, "fetch_record", eiopa_fetch)
+
+
+def test_portal_status_wins_over_register(root, monkeypatch):
+    # portal "Revised" vs register "Final": written with the portal's status,
+    # and no disagreement (both are a published answer); a portal without any
+    # status falls back to the register's
+    rows = [row("DORA261", "eiopa", "3416"), row("DORA262", "eiopa", "3417")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    portal(monkeypatch, {"3416": "Revised"})
+
+    assert run(root) == 0
+    revised = (root / "data" / "dora" / "eiopa-3416.md").read_text()
+    assert 'status: "Revised"' in revised
+    assert "x_register_status" not in revised
+    blank = (root / "data" / "dora" / "eiopa-3417.md").read_text()
+    assert 'status: "Final"' in blank
+    assert "x_register_status" not in blank
+
+
+def test_new_record_not_final_on_portal_is_held_back(root, monkeypatch, capsys):
+    # Register "Final", EIOPA page "Under Review" (seen live: DORA261): only
+    # final answers are mirrored — not written, not an error, re-checked each
+    # run, and written once the portal is final.
+    rows = [row("DORA261", "eiopa", "3416")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    portal(monkeypatch, {"3416": "Under Review"}, {"3416": ""})
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+
+    assert run(root) == 0
+    assert not doc.exists()
+    out = capsys.readouterr().out
+    assert "pending eiopa:3416" in out and "1 pending" in out
+    assert "eiopa:3416" not in State(root / "state.json").data["records"]
+
+    portal(monkeypatch, {"3416": "Final"})
+    assert run(root) == 0
+    assert 'status: "Final"' in doc.read_text()
+
+
+def test_mirrored_record_turning_non_final_is_kept_and_marked(root, monkeypatch):
+    rows = [row("DORA261", "eiopa", "3416")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+    portal(monkeypatch, {"3416": "Final"}, {"3416": "the final answer"})
+    assert run(root) == 0
+
+    # revision pending: the portal reverts to "Under Review", answer gone —
+    # noticed when the record is next verified (forced here via --sweep)
+    portal(monkeypatch, {"3416": "Under Review"}, {"3416": ""})
+    assert run(root, "--sweep") == 0
+    text = doc.read_text()
+    assert 'x_portal_status: "Under Review"' in text
+    assert 'status: "Final"' in text and "the final answer" in text  # kept as is
+    assert "x_delisted" not in text
+    # marked records are re-checked every run, even incrementally
+    assert run(root) == 0
+    assert 'x_portal_status: "Under Review"' in doc.read_text()
+    assert doc.read_text().count("x_portal_status:") == 1
+
+    # final again (answer unchanged) → rewritten on the next (incremental)
+    # run, marker cleared
+    portal(monkeypatch, {"3416": "Final"}, {"3416": "the final answer"})
+    assert run(root) == 0
+    text = doc.read_text()
+    assert "x_portal_status" not in text and "the final answer" in text
+
+
+def test_mark_file_portal_status_updates_existing_marker(tmp_path):
+    from qa_mirror import common
+    f = tmp_path / "data" / "dora" / "eiopa-1.md"
+    f.parent.mkdir(parents=True)
+    f.write_text('---\nstatus: "Final"\nsource_url: "u"\n---\n', encoding="utf-8")
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Under Review") == f
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Under Review") is None
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Withdrawn") == f
+    text = f.read_text()
+    assert 'x_portal_status: "Withdrawn"' in text and text.count("x_portal_status") == 1
+    assert common.mark_file_portal_status(tmp_path, "eiopa:2", "x") is None
+
+
+def test_portal_final_wording_is_not_a_status_disagreement(root, monkeypatch):
+    # ESMA writes "Answer Published", EBA "Final Q&A" for what the register
+    # calls "Final": the portal wording is kept, but nothing is flagged.
+    rows = [row("DORA050", "esma", "2103")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2103", source_url=url,
+                      status="Answer Published", question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
+
+    assert run(root) == 0
+    text = (root / "data" / "dora" / "esma-2103.md").read_text()
+    assert 'status: "Answer Published"' in text
+    assert "x_register_status" not in text
+
+
+VOCAB_CFG = (JOINT_CFG
+             + "register_statuses:\n  ignore: [Rejected, Withdrawn]\n"
+             + "portal_statuses:\n  final: [Final, Final Q&A, Revised]\n"
+             + "  not_final: [Under Review]\n")
+
+
+def test_status_class_and_same_status():
+    vocab = cli._status_vocab({})  # built-in defaults
+    assert cli._status_class(" final  q&A ", vocab) == "final"
+    assert cli._status_class("Answer Published", vocab) == "final"
+    assert cli._status_class("Revised", vocab) == "final"
+    assert cli._status_class("Under Review", vocab) == "not_final"
+    assert cli._status_class("Superseded", vocab) == "unknown"
+    assert cli._status_class("", vocab) == "unknown"
+    assert vocab["register_ignore"] is None  # not configured → no detection
+    assert cli._same_status("Final", "Final Q&A", vocab)
+    assert cli._same_status("Revised", "Final", vocab)
+    assert not cli._same_status("Final", "Under Review", vocab)
+
+
+def test_status_vocab_from_config():
+    vocab = cli._status_vocab({"register_statuses": {"ignore": ["Rejected", ""]},
+                               "portal_statuses": {"final": ["Done"]}})
+    assert vocab["register_ignore"] == {"rejected", ""}
+    assert cli._status_class("done", vocab) == "final"
+    assert cli._status_class("Final", vocab) == "unknown"  # config replaces defaults
+    assert cli._status_class("Under Review", vocab) == "not_final"  # default kept
+
+
+def test_unknown_register_status_is_error_and_suppresses_delisting(root, monkeypatch, capsys):
+    # A mirrored Final record whose register status turns into something new
+    # ("Superseded"): neither mirrored nor dropped in silence, and NOT
+    # mis-marked delisted; ignored statuses (Rejected) stay quiet.
+    (root / "config.yaml").write_text(VOCAB_CFG, encoding="utf-8")
+    rows = [row("DORA001", "eiopa", "2622"), row("DORA002", "eiopa", "2623")]
+    install(monkeypatch, rows)
+    assert run(root) == 0
+    install(monkeypatch, [row("DORA001", "eiopa", "2622", status="Superseded"),
+                          row("DORA002", "eiopa", "2623"),
+                          row("DORA003", "eiopa", "2624", status="Rejected")])
+    assert run(root) == 1
+    err = capsys.readouterr().err
+    assert "unknown register status 'Superseded' for DORA001" in err
+    assert "Rejected" not in err
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
+    assert not (root / "data" / "dora" / "eiopa-2624.md").exists()
+
+
+def test_unknown_portal_status_is_error_and_leaves_record_untouched(root, monkeypatch, capsys):
+    (root / "config.yaml").write_text(VOCAB_CFG, encoding="utf-8")
+    monkeypatch.setattr(cli.register, "discover",
+                        fake_discover([row("DORA261", "eiopa", "3416"),
+                                       row("DORA262", "eiopa", "3417")]))
+    portal(monkeypatch, {"3416": "Final", "3417": "Final"}, {"3416": "answer"})
+    assert run(root) == 0
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+    before = doc.read_text()
+
+    # EIOPA renames its wording: unknown → error, file untouched, no delisting
+    portal(monkeypatch, {"3416": "Published", "3417": "Published"}, {"3416": ""})
+    assert run(root, "--sweep") == 1
+    assert "unknown portal status 'Published' for eiopa:3416" in capsys.readouterr().err
+    assert doc.read_text() == before
+
+    # a new record with an unknown wording is not written either
+    monkeypatch.setattr(cli.register, "discover",
+                        fake_discover([row("DORA261", "eiopa", "3416"),
+                                       row("DORA262", "eiopa", "3417"),
+                                       row("DORA263", "eiopa", "3418")]))
+    portal(monkeypatch, {"3416": "Published", "3417": "Published", "3418": "Published"})
+    assert run(root) == 1
+    assert not (root / "data" / "dora" / "eiopa-3418.md").exists()
+
+
+def test_eba_unknown_portal_status_is_error(tmp_path, monkeypatch, capsys):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    install(monkeypatch, [], eba_listing=eba_listing("2013_9"))
+
+    def renamed(http, url):
+        rec = eba_fetch_final(http, url)
+        rec.status = "Published Q&A"
+        return rec
+    monkeypatch.setattr(eba, "fetch_record", renamed)
+    assert cli.main(["--root", str(tmp_path)]) == 1
+    assert "unknown portal status 'Published Q&A'" in capsys.readouterr().err
+    assert not (tmp_path / "data" / "crd" / "eba-2013-9.md").exists()
+
+
 def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
     # A joint DORA row whose ESMA detail page tags the act as "MiCA" (a real
     # DORA/MiCA VASP crossover) must still file under DORA — the register, not
@@ -155,7 +355,7 @@ def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
              link="https://portal/eiopa/2622-dora001",
              link_alts=["https://portal/eiopa/dora001-2622"])
     monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths: [r])
+                        lambda session, act, statuses, auths, ignore=None: [r])
 
     def fetch(http, url):
         if url.endswith("2622-dora001"):
@@ -176,7 +376,7 @@ def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypa
     rows = default_rows()
     rows[0] = dict(rows[0], link="")
     monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths:
+                        lambda session, act, statuses, auths, ignore=None:
                         [r for r in rows if r["status"] == "Final"])
     assert run(root) == 1  # red: a wanted register row is unreachable
     # the previously mirrored copy is protected from delisting
@@ -188,7 +388,7 @@ def test_register_failure_is_error_and_suppresses_delisting(root, monkeypatch):
     install(monkeypatch, default_rows())
     run(root)
     # now the register query fails wholesale
-    def boom(session, act, statuses, authorities):
+    def boom(session, act, statuses, authorities, ignore=None):
         raise register.RegisterError("powerbi down")
     monkeypatch.setattr(cli.register, "discover", boom)
     assert run(root) == 1  # red
