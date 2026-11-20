@@ -8,7 +8,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -124,8 +124,8 @@ def _retry_after_seconds(value) -> int:
     except (TypeError, ValueError):
         return 0
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    return max(0, math.ceil((when - datetime.now(timezone.utc)).total_seconds()))
+        when = when.replace(tzinfo=UTC)
+    return max(0, math.ceil((when - datetime.now(UTC)).total_seconds()))
 
 
 def soup(html: str) -> BeautifulSoup:
