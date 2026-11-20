@@ -272,7 +272,13 @@ def synth_links(row: dict) -> list[str]:
     return []
 
 
-def discover(session, act_substr: str, statuses, authorities) -> list[dict]:
+def norm_status(status) -> str:
+    """Status comparison key: case- and whitespace-insensitive."""
+    return " ".join(str(status or "").lower().split())
+
+
+def discover(session, act_substr: str, statuses, authorities,
+             ignore=None) -> list[dict]:
     """Register rows for one act, restricted to the wanted statuses and to
     authorities we can fetch (adapter keys eba/eiopa/esma). `act_substr`
     matches the register's 'Legal act' (e.g. 'DORA') by substring.
@@ -281,16 +287,26 @@ def discover(session, act_substr: str, statuses, authorities) -> list[dict]:
     synthesized candidate links (`link` + `link_alts`); rows where not even
     that works are returned with link="" so the caller can fail *visibly* —
     a wanted register row that cannot be fetched is a completeness hole, not
-    something to skip in silence."""
+    something to skip in silence.
+
+    With `ignore` (the register statuses deliberately not mirrored), a row
+    whose status is in neither set is returned flagged `unknown_status` — a
+    new register state must be decided on, not filtered out in silence (that
+    would also mis-mark a mirrored record delisted)."""
     rows = fetch_rows(session)
-    want_status = {s.lower() for s in statuses}
+    want_status = {norm_status(s) for s in statuses}
+    ignored = None if ignore is None else {norm_status(s) for s in ignore}
     picked = []
     for row in rows:
         if act_substr.lower() not in row["legal_act_raw"].lower():
             continue
-        if want_status and row["status"].lower() not in want_status:
-            continue
         if row["authority"] not in authorities:
+            continue
+        st = norm_status(row["status"])
+        if want_status and st not in want_status:
+            if ignored is None or st in ignored:
+                continue
+            picked.append({**row, "unknown_status": True})
             continue
         if not row["link"].startswith("http"):
             cands = synth_links(row)

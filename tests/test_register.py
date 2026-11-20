@@ -108,6 +108,20 @@ def test_discover_filters_act_status_authority_and_link(monkeypatch):
     assert register.discover(object(), "MiCA", {"Final"}, {"esma"}) == []
 
 
+def test_discover_flags_unknown_statuses(monkeypatch):
+    # row A is Final, row B Rejected: with Rejected ignored, nothing unknown;
+    # with nothing ignored, row B comes back flagged instead of vanishing
+    monkeypatch.setattr(register, "_pbi", _fake_pbi)
+    auths = {"eba", "eiopa", "esma"}
+    picked = register.discover(object(), "DORA", {"Final"}, auths,
+                               ignore=[" rejected "])
+    assert [r["joint_id"] for r in picked] == ["DORA001"]
+    picked = register.discover(object(), "DORA", {"Final"}, auths, ignore=[])
+    by_id = {r["joint_id"]: r for r in picked}
+    assert not by_id["DORA001"].get("unknown_status")
+    assert by_id["DORA002"]["unknown_status"] is True
+
+
 class _Resp:
     def __init__(self, status, body=None):
         self.status_code = status

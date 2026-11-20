@@ -134,21 +134,47 @@ def _select(entries, state, mode):
     return must + take
 
 
-# Portal wordings for a published (final) answer, verified live 2026-11:
-# EBA "Final Q&A", ESMA "Answer Published", EIOPA/register "Final". "Revised"
-# (the register's status for a revised final answer, see config statuses)
-# counts the same — Final vs Revised is no disagreement. Its portal wording is
-# unverified (no revised joint Q&A existed in 2026-11); an unknown wording
-# would show up as a rising "pending" count in the run summary, not as silent
-# loss. Used for comparing portal and register status and for the final-only
-# rule — the record keeps the portal's wording verbatim.
-_FINAL_STATUSES = {"final", "final q&a", "answer published", "revised"}
-_PUBLISHED_CLASSES = {"final"}
+# Status vocabulary (config.yaml: register_statuses / portal_statuses; these
+# defaults apply when the config has none). Every status a source shows must
+# be known: a new one is reported as an error — the run goes red and nothing
+# of that authority is delisted — until it is added to the config, instead of
+# being filtered out (or held back) in silence.
+#
+# Portal wordings, verified live 2026-11: final — EBA "Final Q&A", ESMA
+# "Answer Published", EIOPA "Final"; not final — EIOPA "Under Review".
+# "Revised" (a revised final answer) counts as final: Final vs Revised is no
+# disagreement. The record keeps the portal's wording verbatim.
+DEFAULT_PORTAL_FINAL = ["Final", "Final Q&A", "Answer Published", "Revised"]
+DEFAULT_PORTAL_NOT_FINAL = ["Under Review"]
 
 
-def _status_class(status: str) -> str:
-    s = " ".join(str(status or "").lower().split())
-    return "final" if s in _FINAL_STATUSES else s
+def _status_vocab(cfg) -> dict:
+    """Normalized status sets from the config. `register_ignore` is None when
+    the config declares none (then unknown register statuses go undetected)."""
+    reg = cfg.get("register_statuses") or {}
+    por = cfg.get("portal_statuses") or {}
+    norm = register.norm_status
+    return {
+        "register_ignore": (None if "ignore" not in reg
+                            else {norm(x) for x in reg.get("ignore") or []}),
+        "final": {norm(x) for x in por.get("final", DEFAULT_PORTAL_FINAL)},
+        "not_final": {norm(x) for x in por.get("not_final", DEFAULT_PORTAL_NOT_FINAL)},
+    }
+
+
+def _status_class(status: str, vocab: dict) -> str:
+    """'final', 'not_final' or 'unknown' — per the configured vocabulary."""
+    s = register.norm_status(status)
+    if s in vocab["final"]:
+        return "final"
+    return "not_final" if s in vocab["not_final"] else "unknown"
+
+
+def _same_status(a: str, b: str, vocab: dict) -> bool:
+    """Same wording, or both a final answer (portal "Answer Published" vs
+    register "Final", or Revised vs Final) — not a disagreement."""
+    na, nb = register.norm_status(a), register.norm_status(b)
+    return na == nb or (_status_class(a, vocab) == _status_class(b, vocab) == "final")
 
 
 def _hold_back(root, state, rec, totals, auth, tag) -> None:
@@ -202,10 +228,12 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                   mode):
     """Discover joint Q&As via the register; the register enumeration is always
     complete (presence, delisting), detail pages are fetched per _select."""
+    vocab = _status_vocab(cfg)
     for act_name, act in (cfg.get("joint_acts") or {}).items():
         statuses = set(act.get("statuses") or ["Final"])
         try:
-            rows = register.discover(session, act["register_act"], statuses, sel)
+            rows = register.discover(session, act["register_act"], statuses, sel,
+                                     ignore=vocab["register_ignore"])
         except register.RegisterError as exc:
             print(f"[register:{act_name}] DISCOVERY FAILED: {exc}", file=sys.stderr)
             for a in sel:  # cannot conclude anything is gone without the index
@@ -215,6 +243,16 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
         entries = []
         for row in rows:
             auth = row["authority"]
+            if row.get("unknown_status"):
+                # a register state nobody has decided on yet: neither mirror
+                # nor skip in silence, and conclude nothing about presence
+                print(f"[{auth}:{act_name}] ERROR: unknown register status "
+                      f"{row['status']!r} for {row['joint_id']} — add it to "
+                      "config.yaml (joint_acts.<act>.statuses to mirror, "
+                      "register_statuses.ignore to skip)", file=sys.stderr)
+                totals[auth]["errors"] += 1
+                complete[auth] = False
+                continue
             if not row["link"]:
                 # register data-entry error that not even link synthesis could
                 # fix — the record exists but is unreachable: fail visibly and
@@ -245,7 +283,7 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 # portal shows none, and a differing one is kept visible.
                 if not rec.status:
                     rec.status = row["status"]
-                elif row["status"] and _status_class(rec.status) != _status_class(row["status"]):
+                elif row["status"] and not _same_status(rec.status, row["status"], vocab):
                     rec.extra["register_status"] = row["status"]
                 # Joint id and legal act: the register's values win.
                 # The legal act especially: a joint Q&A can straddle acts (e.g. a
@@ -275,7 +313,16 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                 rec.finalize({"default_act_ref": act.get("act_ref", "")})
                 seen[auth].add(state.key(rec))  # real key, in case slug derivation drifted
                 totals[auth]["checked"] += 1
-                if _status_class(rec.status) not in _PUBLISHED_CLASSES:
+                cls = _status_class(rec.status, vocab)
+                if cls == "unknown":
+                    # mirrored copy (if any) stays untouched; no delisting
+                    totals[auth]["errors"] += 1
+                    complete[auth] = False
+                    print(f"[{tag}] ERROR: unknown portal status {rec.status!r} "
+                          f"for {state.key(rec)} — add it to config.yaml "
+                          "(portal_statuses.final or .not_final)", file=sys.stderr)
+                    continue
+                if cls == "not_final":
                     _hold_back(root, state, rec, totals, auth, tag)
                     continue
                 state.mark_verified(state.key(rec), _now())
@@ -300,6 +347,7 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
     if not params.get("legal_act_ids"):
         return
     req = str(params.get("require_status", "") or "")
+    vocab = _status_vocab(cfg)
     # Pre-flight: the portal's own count endpoint says how many finals exist —
     # the only independent completeness reference a first run has. Checks the
     # page budget up front (minute 1, not minute 50) and the discovery at the
@@ -383,6 +431,13 @@ def _mirror_eba(http, root, state, cfg, args, totals, seen, complete, mode):
         n += 1
         try:
             rec = eba.fetch_record(http, url).finalize(params)
+            if _status_class(rec.status, vocab) == "unknown":
+                totals["eba"]["errors"] += 1
+                complete["eba"] = False
+                print(f"[eba] ERROR: unknown portal status {rec.status!r} for "
+                      f"{rec.slug()} — add it to config.yaml "
+                      "(portal_statuses.final or .not_final)", file=sys.stderr)
+                continue
             if req and req.lower() not in rec.status.lower():
                 print(f"[eba] skip {rec.slug()} (status: {rec.status!r})")
                 continue

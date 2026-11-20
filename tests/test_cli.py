@@ -19,12 +19,19 @@ def row(joint, auth, native, status="Final",
 
 def fake_discover(rows):
     """Mirror register.discover's filtering over a canned row list."""
-    def discover(session, act_substr, statuses, authorities):
-        return [r for r in rows
-                if act_substr.lower() in r["legal_act_raw"].lower()
-                and r["status"] in statuses
-                and r["authority"] in authorities
-                and r["link"].startswith("http")]
+    def discover(session, act_substr, statuses, authorities, ignore=None):
+        out = []
+        for r in rows:
+            if (act_substr.lower() not in r["legal_act_raw"].lower()
+                    or r["authority"] not in authorities
+                    or not r["link"].startswith("http")):
+                continue
+            if r["status"] in statuses:
+                out.append(r)
+            elif ignore is not None and register.norm_status(r["status"]) not in {
+                    register.norm_status(x) for x in ignore}:
+                out.append({**r, "unknown_status": True})
+        return out
     return discover
 
 
@@ -205,13 +212,92 @@ def test_portal_final_wording_is_not_a_status_disagreement(root, monkeypatch):
     assert "x_register_status" not in text
 
 
-@pytest.mark.parametrize("a, b, same", [
-    ("Final", "Final Q&A", True), ("Final", "Answer Published", True),
-    (" final ", "FINAL", True), ("Final", "Under Review", False),
-    ("Revised", "Final", True), ("Revised", "Under Review", False),
-])
-def test_status_class(a, b, same):
-    assert (cli._status_class(a) == cli._status_class(b)) is same
+VOCAB_CFG = (JOINT_CFG
+             + "register_statuses:\n  ignore: [Rejected, Withdrawn]\n"
+             + "portal_statuses:\n  final: [Final, Final Q&A, Revised]\n"
+             + "  not_final: [Under Review]\n")
+
+
+def test_status_class_and_same_status():
+    vocab = cli._status_vocab({})  # built-in defaults
+    assert cli._status_class(" final  q&A ", vocab) == "final"
+    assert cli._status_class("Answer Published", vocab) == "final"
+    assert cli._status_class("Revised", vocab) == "final"
+    assert cli._status_class("Under Review", vocab) == "not_final"
+    assert cli._status_class("Superseded", vocab) == "unknown"
+    assert cli._status_class("", vocab) == "unknown"
+    assert vocab["register_ignore"] is None  # not configured → no detection
+    assert cli._same_status("Final", "Final Q&A", vocab)
+    assert cli._same_status("Revised", "Final", vocab)
+    assert not cli._same_status("Final", "Under Review", vocab)
+
+
+def test_status_vocab_from_config():
+    vocab = cli._status_vocab({"register_statuses": {"ignore": ["Rejected", ""]},
+                               "portal_statuses": {"final": ["Done"]}})
+    assert vocab["register_ignore"] == {"rejected", ""}
+    assert cli._status_class("done", vocab) == "final"
+    assert cli._status_class("Final", vocab) == "unknown"  # config replaces defaults
+    assert cli._status_class("Under Review", vocab) == "not_final"  # default kept
+
+
+def test_unknown_register_status_is_error_and_suppresses_delisting(root, monkeypatch, capsys):
+    # A mirrored Final record whose register status turns into something new
+    # ("Superseded"): neither mirrored nor dropped in silence, and NOT
+    # mis-marked delisted; ignored statuses (Rejected) stay quiet.
+    (root / "config.yaml").write_text(VOCAB_CFG, encoding="utf-8")
+    rows = [row("DORA001", "eiopa", "2622"), row("DORA002", "eiopa", "2623")]
+    install(monkeypatch, rows)
+    assert run(root) == 0
+    install(monkeypatch, [row("DORA001", "eiopa", "2622", status="Superseded"),
+                          row("DORA002", "eiopa", "2623"),
+                          row("DORA003", "eiopa", "2624", status="Rejected")])
+    assert run(root) == 1
+    err = capsys.readouterr().err
+    assert "unknown register status 'Superseded' for DORA001" in err
+    assert "Rejected" not in err
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
+    assert not (root / "data" / "dora" / "eiopa-2624.md").exists()
+
+
+def test_unknown_portal_status_is_error_and_leaves_record_untouched(root, monkeypatch, capsys):
+    (root / "config.yaml").write_text(VOCAB_CFG, encoding="utf-8")
+    monkeypatch.setattr(cli.register, "discover",
+                        fake_discover([row("DORA261", "eiopa", "3416"),
+                                       row("DORA262", "eiopa", "3417")]))
+    portal(monkeypatch, {"3416": "Final", "3417": "Final"}, {"3416": "answer"})
+    assert run(root) == 0
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+    before = doc.read_text()
+
+    # EIOPA renames its wording: unknown → error, file untouched, no delisting
+    portal(monkeypatch, {"3416": "Published", "3417": "Published"}, {"3416": ""})
+    assert run(root, "--sweep") == 1
+    assert "unknown portal status 'Published' for eiopa:3416" in capsys.readouterr().err
+    assert doc.read_text() == before
+
+    # a new record with an unknown wording is not written either
+    monkeypatch.setattr(cli.register, "discover",
+                        fake_discover([row("DORA261", "eiopa", "3416"),
+                                       row("DORA262", "eiopa", "3417"),
+                                       row("DORA263", "eiopa", "3418")]))
+    portal(monkeypatch, {"3416": "Published", "3417": "Published", "3418": "Published"})
+    assert run(root) == 1
+    assert not (root / "data" / "dora" / "eiopa-3418.md").exists()
+
+
+def test_eba_unknown_portal_status_is_error(tmp_path, monkeypatch, capsys):
+    (tmp_path / "config.yaml").write_text(EBA_CFG, encoding="utf-8")
+    install(monkeypatch, [], eba_listing=eba_listing("2013_9"))
+
+    def renamed(http, url):
+        rec = eba_fetch_final(http, url)
+        rec.status = "Published Q&A"
+        return rec
+    monkeypatch.setattr(eba, "fetch_record", renamed)
+    assert cli.main(["--root", str(tmp_path)]) == 1
+    assert "unknown portal status 'Published Q&A'" in capsys.readouterr().err
+    assert not (tmp_path / "data" / "crd" / "eba-2013-9.md").exists()
 
 
 def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
@@ -269,7 +355,7 @@ def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
              link="https://portal/eiopa/2622-dora001",
              link_alts=["https://portal/eiopa/dora001-2622"])
     monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths: [r])
+                        lambda session, act, statuses, auths, ignore=None: [r])
 
     def fetch(http, url):
         if url.endswith("2622-dora001"):
@@ -290,7 +376,7 @@ def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypa
     rows = default_rows()
     rows[0] = dict(rows[0], link="")
     monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths:
+                        lambda session, act, statuses, auths, ignore=None:
                         [r for r in rows if r["status"] == "Final"])
     assert run(root) == 1  # red: a wanted register row is unreachable
     # the previously mirrored copy is protected from delisting
@@ -302,7 +388,7 @@ def test_register_failure_is_error_and_suppresses_delisting(root, monkeypatch):
     install(monkeypatch, default_rows())
     run(root)
     # now the register query fails wholesale
-    def boom(session, act, statuses, authorities):
+    def boom(session, act, statuses, authorities, ignore=None):
         raise register.RegisterError("powerbi down")
     monkeypatch.setattr(cli.register, "discover", boom)
     assert run(root) == 1  # red
