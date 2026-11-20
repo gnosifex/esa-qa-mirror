@@ -134,16 +134,16 @@ def _select(entries, state, mode):
     return must + take
 
 
-# Portal wordings for "final" (verified live 2026-11: EBA "Final Q&A", ESMA
-# "Answer Published", EIOPA/register "Final"). For comparing portal and
-# register status and for the final-only rule — the record keeps the portal's
-# wording verbatim.
-_FINAL_STATUSES = {"final", "final q&a", "answer published"}
-# Statuses whose answer is mirrored. "revised" mirrors the register's
-# "Revised" (config statuses); its portal wording is unverified — no revised
-# joint Q&A existed in 2026-11. An unknown final wording would show up as a
-# rising "pending" count in the run summary, not as silent loss.
-_PUBLISHED_CLASSES = {"final", "revised"}
+# Portal wordings for a published (final) answer, verified live 2026-11:
+# EBA "Final Q&A", ESMA "Answer Published", EIOPA/register "Final". "Revised"
+# (the register's status for a revised final answer, see config statuses)
+# counts the same — Final vs Revised is no disagreement. Its portal wording is
+# unverified (no revised joint Q&A existed in 2026-11); an unknown wording
+# would show up as a rising "pending" count in the run summary, not as silent
+# loss. Used for comparing portal and register status and for the final-only
+# rule — the record keeps the portal's wording verbatim.
+_FINAL_STATUSES = {"final", "final q&a", "answer published", "revised"}
+_PUBLISHED_CLASSES = {"final"}
 
 
 def _status_class(status: str) -> str:

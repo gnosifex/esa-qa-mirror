@@ -111,9 +111,9 @@ def portal(monkeypatch, statuses, answers=None):
 
 
 def test_portal_status_wins_over_register(root, monkeypatch):
-    # portal "Revised" vs register "Final": the portal's status is recorded,
-    # the register's kept visible as x_register_status; a portal without any
-    # status falls back to the register's, with no marker
+    # portal "Revised" vs register "Final": written with the portal's status,
+    # and no disagreement (both are a published answer); a portal without any
+    # status falls back to the register's
     rows = [row("DORA261", "eiopa", "3416"), row("DORA262", "eiopa", "3417")]
     monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
     portal(monkeypatch, {"3416": "Revised"})
@@ -121,7 +121,7 @@ def test_portal_status_wins_over_register(root, monkeypatch):
     assert run(root) == 0
     revised = (root / "data" / "dora" / "eiopa-3416.md").read_text()
     assert 'status: "Revised"' in revised
-    assert 'x_register_status: "Final"' in revised
+    assert "x_register_status" not in revised
     blank = (root / "data" / "dora" / "eiopa-3417.md").read_text()
     assert 'status: "Final"' in blank
     assert "x_register_status" not in blank
@@ -208,7 +208,7 @@ def test_portal_final_wording_is_not_a_status_disagreement(root, monkeypatch):
 @pytest.mark.parametrize("a, b, same", [
     ("Final", "Final Q&A", True), ("Final", "Answer Published", True),
     (" final ", "FINAL", True), ("Final", "Under Review", False),
-    ("Revised", "Final", False),
+    ("Revised", "Final", True), ("Revised", "Under Review", False),
 ])
 def test_status_class(a, b, same):
     assert (cli._status_class(a) == cli._status_class(b)) is same
