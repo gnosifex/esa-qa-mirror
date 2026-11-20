@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 import requests
@@ -78,7 +80,9 @@ class Http:
                 self._last = time.monotonic()
                 if resp.status_code in self.RETRYABLE and attempt < self.retries:
                     backoff = min(
-                        300, int(resp.headers.get("Retry-After") or 0) or 15 * 2**attempt
+                        300,
+                        _retry_after_seconds(resp.headers.get("Retry-After"))
+                        or 15 * 2**attempt,
                     )
                     print(
                         f"[http] {resp.status_code} for {url} — retrying in {backoff}s",
@@ -101,6 +105,27 @@ class Http:
                 )
                 time.sleep(backoff)
         raise RuntimeError("unreachable")
+
+
+def _retry_after_seconds(value) -> int:
+    """Seconds from a Retry-After header; 0 when absent or unusable.
+
+    RFC 9110 allows delay-seconds or an HTTP-date. EIOPA's CloudFront sends a
+    fractional "0.000" on its 429s (seen live since 2026-11-17) — int() on that
+    crashed the fetch instead of backing off. 0 means: use our own backoff."""
+    if not value:
+        return 0
+    try:
+        return max(0, math.ceil(float(value)))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return 0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0, math.ceil((when - datetime.now(timezone.utc)).total_seconds()))
 
 
 def soup(html: str) -> BeautifulSoup:

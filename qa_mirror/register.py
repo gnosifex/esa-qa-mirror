@@ -254,14 +254,21 @@ def synth_links(row: dict) -> list[str]:
         if nid:
             return [f"{esma.BASE}/publications-data/questions-answers/{nid}"]
     if row["authority"] == "eiopa":
-        # EIOPA slugs combine native id and joint id — in either order (both
-        # exist live: 2734-dora003_en and dora001-2622_en).
+        # EIOPA slugs combine native id and joint id — in either order, and
+        # with or without a hyphen inside the joint id (all exist live:
+        # 2734-dora003_en, dora001-2622_en, 3450-dora-272_en,
+        # dora-261-3416_en).
         slug = re.sub(r"[^A-Za-z0-9]+", "-", native).strip("-").lower()
         base = f"{eiopa.BASE}/qa-regulation/questions-and-answers-database"
         if joint and joint in slug:
             return [f"{base}/{slug}_en"]
         if slug and joint:
-            return [f"{base}/{slug}-{joint}_en", f"{base}/{joint}-{slug}_en"]
+            joints = [joint]
+            m = re.fullmatch(r"([a-z]+)(\d+)", joint)
+            if m:
+                joints.append(f"{m.group(1)}-{m.group(2)}")
+            return [f"{base}/{s}_en"
+                    for j in joints for s in (f"{slug}-{j}", f"{j}-{slug}")]
     return []
 
 
