@@ -403,6 +403,10 @@ class Record:
 # portal listing: it can never equal a real content hash, so a reappearing
 # record is always treated as changed and rewritten (clearing the marker).
 DELISTED_HASH_PREFIX = "delisted:"
+# Same trick for a mirrored record whose portal page no longer shows a final
+# status (file kept, marked x_portal_status): the record is re-checked every
+# run, and once the portal is final again it is rewritten, clearing the marker.
+PORTAL_STATUS_HASH_PREFIX = "portal-status:"
 
 
 def slug_of(raw: str) -> str:
@@ -467,6 +471,11 @@ class State:
         if not cur.startswith(DELISTED_HASH_PREFIX):
             self.data["records"][key] = DELISTED_HASH_PREFIX + cur
 
+    def mark_portal_status(self, key: str):
+        cur = self.data["records"].get(key, "")
+        if not cur.startswith((DELISTED_HASH_PREFIX, PORTAL_STATUS_HASH_PREFIX)):
+            self.data["records"][key] = PORTAL_STATUS_HASH_PREFIX + cur
+
     def save(self):
         self.path.write_text(
             json.dumps(self.data, indent=1, sort_keys=True), encoding="utf-8"
@@ -507,6 +516,29 @@ def mark_file_gone(root: Path, key: str, date_iso: str, field: str) -> Path | No
             count=1,
             flags=re.MULTILINE,
         )
+        if new == text:
+            return None
+        f.write_text(new, encoding="utf-8")
+        return f
+    return None
+
+
+def mark_file_portal_status(root: Path, key: str, status: str) -> Path | None:
+    """Flag the record file for state key "authority:slug" whose portal page
+    currently shows a non-final status (e.g. "Under Review" while a revision
+    is pending). The mirrored final answer is kept; the file gets
+    `x_portal_status: "<status>"` (updated if the status changes). Returns the
+    file path if it was changed, None if already marked so or not found."""
+    authority, slug = key.split(":", 1)
+    field = f"x_portal_status: {json.dumps(status, ensure_ascii=False)}"
+    for f in sorted((root / "data").glob(f"*/{authority}-{slug}.md")):
+        text = f.read_text(encoding="utf-8")
+        if re.search(r"^x_portal_status: ", text, flags=re.MULTILINE):
+            new = re.sub(r"^x_portal_status: .*$", lambda _: field, text,
+                         count=1, flags=re.MULTILINE)
+        else:
+            new = re.sub(r"^source_url: ", lambda _: f"{field}\nsource_url: ",
+                         text, count=1, flags=re.MULTILINE)
         if new == text:
             return None
         f.write_text(new, encoding="utf-8")

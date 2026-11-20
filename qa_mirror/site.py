@@ -63,6 +63,7 @@ def build(root: Path) -> int:
             or "",
             "delisted": fm.get("x_delisted", ""),
             "archived": fm.get("x_archived", ""),
+            "portal_status": fm.get("x_portal_status", ""),
             # date of the last (re)write = when a change was last mirrored
             "mirrored": str(fm.get("retrieved_at", ""))[:10],
             "source_url": fm.get("source_url", ""),

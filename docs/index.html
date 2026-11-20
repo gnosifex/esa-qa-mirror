@@ -170,7 +170,8 @@ function render(R){
         ${r.joint_id?' · '+hl(r.joint_id,hre):''} · ${esc(r.legal_act)}${r.article?' Art. '+hl(r.article,hre):''}
         ${r.topic?' · '+hl(r.topic,hre):''} · ${esc(r.status)}${r.date?' · '+esc(r.date):''}${r.mirrored?' · <span title="last change mirrored">mirrored '+esc(r.mirrored)+'</span>':''}
         ${r.archived?' · <b>⚠ archived at the authority after a review (since '+esc(r.archived)+')</b>':''}
-        ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}</div>
+        ${r.delisted?' · <b>⚠ no longer listed at the authority (since '+esc(r.delisted)+')</b>':''}
+        ${r.portal_status?' · <b>⚠ the authority currently shows this Q&amp;A as “'+esc(r.portal_status)+'” — the answer below is the last final version</b>':''}</div>
       <div class="label">Question</div>
       <div class="a clampable">${hl(r.question,hre)}</div>
       ${r.background?`<div class="label">Background</div><div class="a clampable">${hl(r.background,hre)}</div>`:''}

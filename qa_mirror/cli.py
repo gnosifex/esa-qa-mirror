@@ -46,13 +46,14 @@ def _write_step_summary(totals: dict):
     lines = [
         f"## Mirror run: {', '.join(totals)}",
         "",
-        "| authority | enumerated | checked | written | archived | delisted | errors |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        ("| authority | enumerated | checked | written | archived | delisted "
+         "| pending | errors |"),
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for auth, t in totals.items():
         lines.append(
             f"| {auth} | {t['enumerated']} | {t['checked']} | {t['written']} "
-            f"| {t['archived']} | {t['delisted']} | {t['errors']} |"
+            f"| {t['archived']} | {t['delisted']} | {t['pending']} | {t['errors']} |"
         )
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
@@ -120,7 +121,8 @@ def _select(entries, state, mode):
     for e in entries:
         h = state.data["records"].get(e[0])
         if (mode["sweep_by"][e[0].split(":", 1)[0]] or h is None
-                or h.startswith(common.DELISTED_HASH_PREFIX) or e[1]):
+                or h.startswith((common.DELISTED_HASH_PREFIX,
+                                 common.PORTAL_STATUS_HASH_PREFIX)) or e[1]):
             must.append(e)
         else:
             rest.append(e)
@@ -133,14 +135,41 @@ def _select(entries, state, mode):
 
 
 # Portal wordings for "final" (verified live 2026-11: EBA "Final Q&A", ESMA
-# "Answer Published", EIOPA/register "Final"). Only for comparing portal and
-# register status — the record keeps the portal's wording verbatim.
+# "Answer Published", EIOPA/register "Final"). For comparing portal and
+# register status and for the final-only rule — the record keeps the portal's
+# wording verbatim.
 _FINAL_STATUSES = {"final", "final q&a", "answer published"}
+# Statuses whose answer is mirrored. "revised" mirrors the register's
+# "Revised" (config statuses); its portal wording is unverified — no revised
+# joint Q&A existed in 2026-11. An unknown final wording would show up as a
+# rising "pending" count in the run summary, not as silent loss.
+_PUBLISHED_CLASSES = {"final", "revised"}
 
 
 def _status_class(status: str) -> str:
     s = " ".join(str(status or "").lower().split())
     return "final" if s in _FINAL_STATUSES else s
+
+
+def _hold_back(root, state, rec, totals, auth, tag) -> None:
+    """A register-listed Q&A whose portal page is not final (e.g. register
+    "Final", EIOPA page "Under Review"): only final answers are mirrored, so a
+    new one is not written — it is not in state.json, so every run re-checks
+    it and it appears once the portal is final. An already mirrored one keeps
+    its file, marked x_portal_status, and is re-checked every run until the
+    portal is final again (then rewritten, which clears the marker). Neither
+    is an error: the source is inconsistent, not the mirror broken."""
+    key = state.key(rec)
+    totals[auth]["pending"] += 1
+    if key in state.data["records"]:
+        state.mark_verified(key, _now())
+        path = common.mark_file_portal_status(root, key, rec.status)
+        state.mark_portal_status(key)
+        what = f"marked {path.relative_to(root)}" if path else "already marked"
+        print(f"[{tag}] portal status {rec.status!r} for mirrored {key} → {what}")
+    else:
+        print(f"[{tag}] pending {key}: portal status {rec.status!r} "
+              f"(register: {rec.extra.get('register_status', '')!r}) — not written")
 
 
 def _fetch_first(adapter, http, urls):
@@ -245,8 +274,11 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
                     rec.dates.setdefault("publication_final_answer", row["date_publication"])
                 rec.finalize({"default_act_ref": act.get("act_ref", "")})
                 seen[auth].add(state.key(rec))  # real key, in case slug derivation drifted
-                state.mark_verified(state.key(rec), _now())
                 totals[auth]["checked"] += 1
+                if _status_class(rec.status) not in _PUBLISHED_CLASSES:
+                    _hold_back(root, state, rec, totals, auth, tag)
+                    continue
+                state.mark_verified(state.key(rec), _now())
                 _write_delta(root, state, rec, args, totals, auth, tag)
             except Exception as exc:  # noqa: BLE001 — one bad detail page must not stop the run
                 totals[auth]["errors"] += 1
@@ -450,7 +482,8 @@ def main(argv=None) -> int:
 
     sel = set(ADAPTERS) if args.authority == "all" else {args.authority}
     totals = {a: {"enumerated": 0, "seen": 0, "written": 0, "checked": 0,
-                  "archived": 0, "delisted": 0, "errors": 0} for a in ADAPTERS}
+                  "archived": 0, "delisted": 0, "pending": 0, "errors": 0}
+              for a in ADAPTERS}
     seen = {a: set() for a in ADAPTERS}
     # an authority this run does not cover was not enumerated — never a basis
     # for delisting (its empty `seen` would look like everything vanished)
@@ -481,7 +514,8 @@ def main(argv=None) -> int:
     for auth, t in totals.items():
         print(f"  {auth}: {t['enumerated']} enumerated, {t['checked']} checked, "
               f"{t['written']} written, {t['archived']} archived, "
-              f"{t['delisted']} delisted, {t['errors']} errors")
+              f"{t['delisted']} delisted, {t['pending']} pending (portal not final), "
+              f"{t['errors']} errors")
     _write_step_summary(totals)
     if not args.limit:
         _write_run_manifest(root, args, sel, totals, mode)

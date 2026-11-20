@@ -100,28 +100,92 @@ def test_joint_discovery_writes_then_delta(root, monkeypatch):
     assert state.data["records"]["eiopa:2622"]  # remembered
 
 
-def test_portal_status_wins_over_register(root, monkeypatch):
-    # Register says "Final", the EIOPA page still says "Under Review" (seen
-    # live: DORA261) — the portal's status is recorded, the register's kept
-    # visible as x_register_status.
-    rows = [row("DORA261", "eiopa", "3416"), row("DORA262", "eiopa", "3417")]
-    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
-
+def portal(monkeypatch, statuses, answers=None):
+    """EIOPA fetch stub: per native id, the status (and answer) the portal shows."""
     def eiopa_fetch(http, url):
         nid = url.rsplit("/", 1)[-1]
         return Record(authority="eiopa", qa_id=nid, source_url=url,
-                      status="Under Review" if nid == "3416" else "",
-                      question="Q", answer="A")
+                      status=statuses.get(nid, ""), question="Q",
+                      answer=(answers or {}).get(nid, "A"))
     monkeypatch.setattr(eiopa, "fetch_record", eiopa_fetch)
 
+
+def test_portal_status_wins_over_register(root, monkeypatch):
+    # portal "Revised" vs register "Final": the portal's status is recorded,
+    # the register's kept visible as x_register_status; a portal without any
+    # status falls back to the register's, with no marker
+    rows = [row("DORA261", "eiopa", "3416"), row("DORA262", "eiopa", "3417")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    portal(monkeypatch, {"3416": "Revised"})
+
     assert run(root) == 0
-    lagging = (root / "data" / "dora" / "eiopa-3416.md").read_text()
-    assert 'status: "Under Review"' in lagging
-    assert 'x_register_status: "Final"' in lagging
-    # portal shows no status → the register's value fills the gap, no marker
+    revised = (root / "data" / "dora" / "eiopa-3416.md").read_text()
+    assert 'status: "Revised"' in revised
+    assert 'x_register_status: "Final"' in revised
     blank = (root / "data" / "dora" / "eiopa-3417.md").read_text()
     assert 'status: "Final"' in blank
     assert "x_register_status" not in blank
+
+
+def test_new_record_not_final_on_portal_is_held_back(root, monkeypatch, capsys):
+    # Register "Final", EIOPA page "Under Review" (seen live: DORA261): only
+    # final answers are mirrored — not written, not an error, re-checked each
+    # run, and written once the portal is final.
+    rows = [row("DORA261", "eiopa", "3416")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    portal(monkeypatch, {"3416": "Under Review"}, {"3416": ""})
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+
+    assert run(root) == 0
+    assert not doc.exists()
+    out = capsys.readouterr().out
+    assert "pending eiopa:3416" in out and "1 pending" in out
+    assert "eiopa:3416" not in State(root / "state.json").data["records"]
+
+    portal(monkeypatch, {"3416": "Final"})
+    assert run(root) == 0
+    assert 'status: "Final"' in doc.read_text()
+
+
+def test_mirrored_record_turning_non_final_is_kept_and_marked(root, monkeypatch):
+    rows = [row("DORA261", "eiopa", "3416")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    doc = root / "data" / "dora" / "eiopa-3416.md"
+    portal(monkeypatch, {"3416": "Final"}, {"3416": "the final answer"})
+    assert run(root) == 0
+
+    # revision pending: the portal reverts to "Under Review", answer gone —
+    # noticed when the record is next verified (forced here via --sweep)
+    portal(monkeypatch, {"3416": "Under Review"}, {"3416": ""})
+    assert run(root, "--sweep") == 0
+    text = doc.read_text()
+    assert 'x_portal_status: "Under Review"' in text
+    assert 'status: "Final"' in text and "the final answer" in text  # kept as is
+    assert "x_delisted" not in text
+    # marked records are re-checked every run, even incrementally
+    assert run(root) == 0
+    assert 'x_portal_status: "Under Review"' in doc.read_text()
+    assert doc.read_text().count("x_portal_status:") == 1
+
+    # final again (answer unchanged) → rewritten on the next (incremental)
+    # run, marker cleared
+    portal(monkeypatch, {"3416": "Final"}, {"3416": "the final answer"})
+    assert run(root) == 0
+    text = doc.read_text()
+    assert "x_portal_status" not in text and "the final answer" in text
+
+
+def test_mark_file_portal_status_updates_existing_marker(tmp_path):
+    from qa_mirror import common
+    f = tmp_path / "data" / "dora" / "eiopa-1.md"
+    f.parent.mkdir(parents=True)
+    f.write_text('---\nstatus: "Final"\nsource_url: "u"\n---\n', encoding="utf-8")
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Under Review") == f
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Under Review") is None
+    assert common.mark_file_portal_status(tmp_path, "eiopa:1", "Withdrawn") == f
+    text = f.read_text()
+    assert 'x_portal_status: "Withdrawn"' in text and text.count("x_portal_status") == 1
+    assert common.mark_file_portal_status(tmp_path, "eiopa:2", "x") is None
 
 
 def test_portal_final_wording_is_not_a_status_disagreement(root, monkeypatch):
