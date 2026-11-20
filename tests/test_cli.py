@@ -100,6 +100,56 @@ def test_joint_discovery_writes_then_delta(root, monkeypatch):
     assert state.data["records"]["eiopa:2622"]  # remembered
 
 
+def test_portal_status_wins_over_register(root, monkeypatch):
+    # Register says "Final", the EIOPA page still says "Under Review" (seen
+    # live: DORA261) — the portal's status is recorded, the register's kept
+    # visible as x_register_status.
+    rows = [row("DORA261", "eiopa", "3416"), row("DORA262", "eiopa", "3417")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def eiopa_fetch(http, url):
+        nid = url.rsplit("/", 1)[-1]
+        return Record(authority="eiopa", qa_id=nid, source_url=url,
+                      status="Under Review" if nid == "3416" else "",
+                      question="Q", answer="A")
+    monkeypatch.setattr(eiopa, "fetch_record", eiopa_fetch)
+
+    assert run(root) == 0
+    lagging = (root / "data" / "dora" / "eiopa-3416.md").read_text()
+    assert 'status: "Under Review"' in lagging
+    assert 'x_register_status: "Final"' in lagging
+    # portal shows no status → the register's value fills the gap, no marker
+    blank = (root / "data" / "dora" / "eiopa-3417.md").read_text()
+    assert 'status: "Final"' in blank
+    assert "x_register_status" not in blank
+
+
+def test_portal_final_wording_is_not_a_status_disagreement(root, monkeypatch):
+    # ESMA writes "Answer Published", EBA "Final Q&A" for what the register
+    # calls "Final": the portal wording is kept, but nothing is flagged.
+    rows = [row("DORA050", "esma", "2103")]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+
+    def esma_fetch(http, url):
+        return Record(authority="esma", qa_id="2103", source_url=url,
+                      status="Answer Published", question="Q", answer="A")
+    monkeypatch.setattr(esma, "fetch_record", esma_fetch)
+
+    assert run(root) == 0
+    text = (root / "data" / "dora" / "esma-2103.md").read_text()
+    assert 'status: "Answer Published"' in text
+    assert "x_register_status" not in text
+
+
+@pytest.mark.parametrize("a, b, same", [
+    ("Final", "Final Q&A", True), ("Final", "Answer Published", True),
+    (" final ", "FINAL", True), ("Final", "Under Review", False),
+    ("Revised", "Final", False),
+])
+def test_status_class(a, b, same):
+    assert (cli._status_class(a) == cli._status_class(b)) is same
+
+
 def test_register_act_wins_for_cross_act_joint_record(root, monkeypatch):
     # A joint DORA row whose ESMA detail page tags the act as "MiCA" (a real
     # DORA/MiCA VASP crossover) must still file under DORA — the register, not

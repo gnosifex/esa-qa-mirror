@@ -132,6 +132,17 @@ def _select(entries, state, mode):
     return must + take
 
 
+# Portal wordings for "final" (verified live 2026-11: EBA "Final Q&A", ESMA
+# "Answer Published", EIOPA/register "Final"). Only for comparing portal and
+# register status — the record keeps the portal's wording verbatim.
+_FINAL_STATUSES = {"final", "final q&a", "answer published"}
+
+
+def _status_class(status: str) -> str:
+    s = " ".join(str(status or "").lower().split())
+    return "final" if s in _FINAL_STATUSES else s
+
+
 def _fetch_first(adapter, http, urls):
     """Fetch the first URL that resolves. Alternates only exist for register
     rows with repaired links, where the first candidate is a guess — for
@@ -198,14 +209,22 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             try:
                 rec = _fetch_first(ADAPTERS[auth], http,
                                    [row["link"], *row.get("link_alts", [])])
-                # register metadata is authoritative for the shared/joint fields.
+                # The receiving portal is the source of truth for the record's
+                # status: the register can run ahead of (or behind) the portal
+                # (seen live: DORA261 "Final" in the register, "Under Review"
+                # on EIOPA's page). The register's value is used only when the
+                # portal shows none, and a differing one is kept visible.
+                if not rec.status:
+                    rec.status = row["status"]
+                elif row["status"] and _status_class(rec.status) != _status_class(row["status"]):
+                    rec.extra["register_status"] = row["status"]
+                # Joint id and legal act: the register's values win.
                 # The legal act especially: a joint Q&A can straddle acts (e.g. a
                 # DORA/MiCA VASP question), and the receiving portal may tag it by
                 # the *other* act — but the register placed it in this joint act's
                 # set, so its act string wins, keeping the record filed under the
                 # act we discovered it for rather than in data/unsorted/.
                 rec.joint_id = row["joint_id"] or rec.joint_id
-                rec.status = row["status"] or rec.status
                 if row["legal_act_raw"]:
                     portal_act = rec.legal_act_raw
                     rec.legal_act_raw = row["legal_act_raw"]
