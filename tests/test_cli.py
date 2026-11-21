@@ -348,25 +348,84 @@ def test_authority_filter_restricts_rows(root, monkeypatch):
     assert not (root / "data" / "dora" / "eiopa-2622.md").exists()
 
 
-def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
-    # a repaired register row carries guessed candidates; the first one 404s,
-    # the alternate resolves — the record must be mirrored from the alternate
-    r = dict(row("DORA001", "eiopa", "2622"),
-             link="https://portal/eiopa/2622-dora001",
-             link_alts=["https://portal/eiopa/dora001-2622"])
-    monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths, ignore=None: [r])
+def http_error(code):
+    import requests
 
+    class R:
+        status_code = code
+    return requests.HTTPError(str(code), response=R())
+
+
+def repaired_row():
+    return dict(row("DORA261", "eiopa", "3416"),
+                link="https://portal/eiopa/3416-dora261",
+                link_alts=["https://portal/eiopa/dora261-3416",
+                           "https://portal/eiopa/dora-261-3416"],
+                link_repaired=True)
+
+
+def guessing_portal(monkeypatch, calls, real="dora-261-3416", fail=404):
+    """Only `real` exists; every other guess fails with `fail`."""
     def fetch(http, url):
-        if url.endswith("2622-dora001"):
-            raise RuntimeError("404")
-        return Record(authority="eiopa", qa_id="2622", source_url=url,
-                      question="Q", answer="A")
+        calls.append(url.rsplit("/", 1)[-1])
+        if not url.endswith(real):
+            raise http_error(fail)
+        return Record(authority="eiopa", qa_id="DORA 261 - 3416", source_url=url,
+                      status="Final", question="Q", answer="A")
     monkeypatch.setattr(eiopa, "fetch_record", fetch)
 
+
+def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
+    # a repaired register row carries guessed candidates; the wrong ones 404,
+    # the last resolves — the record is mirrored from it
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls)
     assert run(root) == 0
-    text = (root / "data" / "dora" / "eiopa-2622.md").read_text()
-    assert "dora001-2622" in text  # the alternate is the recorded source
+    assert calls == ["3416-dora261", "dora261-3416", "dora-261-3416"]
+    text = (root / "data" / "dora" / "eiopa-dora-261-3416.md").read_text()
+    assert "dora-261-3416" in text  # the alternate is the recorded source
+
+
+def test_resolved_link_is_remembered_and_tried_first(root, monkeypatch):
+    # the wrong guesses cost requests (and feed a portal's throttle): once a
+    # candidate resolved, later runs fetch it directly
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls)
+    assert run(root) == 0
+    state = State(root / "state.json")
+    assert state.data["resolved_links"] == {
+        "eiopa:DORA261": "https://portal/eiopa/dora-261-3416"}
+    calls.clear()
+    assert run(root, "--sweep") == 0
+    assert calls == ["dora-261-3416"]
+
+
+def test_remembered_link_that_breaks_falls_back_to_guessing(root, monkeypatch):
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls)
+    assert run(root) == 0
+    # the portal moves the page to another of the candidate slugs
+    calls.clear()
+    guessing_portal(monkeypatch, calls, real="dora261-3416")
+    assert run(root, "--sweep") == 0
+    assert calls == ["dora-261-3416", "3416-dora261", "dora261-3416"]
+    assert State(root / "state.json").data["resolved_links"]["eiopa:DORA261"] \
+        == "https://portal/eiopa/dora261-3416"
+
+
+def test_throttled_guess_stops_instead_of_trying_more(root, monkeypatch, capsys):
+    # a 429 that outlasted the retries says nothing about the guess — no
+    # further guesses into a throttling portal; error, no delisting
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls, fail=429)
+    assert run(root) == 1
+    assert calls == ["3416-dora261"]
+    assert "ERROR" in capsys.readouterr().err
+    assert "resolved_links" not in State(root / "state.json").data
 
 
 def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypatch):

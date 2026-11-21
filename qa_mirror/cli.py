@@ -199,15 +199,35 @@ def _hold_back(root, state, rec, totals, auth, tag) -> None:
 
 
 def _fetch_first(adapter, http, urls):
-    """Fetch the first URL that resolves. Alternates only exist for register
-    rows with repaired links, where the first candidate is a guess — for
-    ordinary rows the list has one entry and this is a plain fetch."""
+    """Fetch the first URL that resolves; returns (record, url). Alternates
+    only exist for register rows with repaired links, where the candidates are
+    guesses — for ordinary rows the list has one entry and this is a plain
+    fetch. Only a 404 moves on to the next guess: any other failure (above
+    all a 429 that outlasted Http's retries) says nothing about whether the
+    guess exists, and hammering further guesses into a throttling portal only
+    prolongs the throttle (seen live 2026-11-21 at EIOPA)."""
     for u in urls[:-1]:
         try:
-            return adapter.fetch_record(http, u)
-        except Exception:  # noqa: BLE001, S112 — any failure means: try the next candidate
-            continue
-    return adapter.fetch_record(http, urls[-1])
+            return adapter.fetch_record(http, u), u
+        except requests.HTTPError as exc:
+            if getattr(exc.response, "status_code", None) != 404:
+                raise
+    return adapter.fetch_record(http, urls[-1]), urls[-1]
+
+
+def _prefer_resolved_link(row: dict, state: State) -> dict:
+    """For a repaired register row, put the candidate that resolved on an
+    earlier run first (state.json "resolved_links"), so the wrong guesses are
+    not re-tried every run. A remembered URL that is no longer among the
+    candidates (the row's ids changed) is ignored."""
+    if not row.get("link_repaired"):
+        return row
+    cands = [row["link"], *row.get("link_alts", [])]
+    known = state.data.get("resolved_links", {}).get(
+        f"{row['authority']}:{row['joint_id']}")
+    if known not in cands or known == cands[0]:
+        return row
+    return {**row, "link": known, "link_alts": [c for c in cands if c != known]}
 
 
 def _write_delta(root, state, rec, args, totals, auth, tag):
@@ -242,6 +262,7 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             continue
         entries = []
         for row in rows:
+            row = _prefer_resolved_link(row, state)
             auth = row["authority"]
             if row.get("unknown_status"):
                 # a register state nobody has decided on yet: neither mirror
@@ -274,8 +295,11 @@ def _mirror_joint(http, session, root, state, cfg, args, sel, totals, seen, comp
             auth = row["authority"]
             tag = f"{auth}:{act_name}"
             try:
-                rec = _fetch_first(ADAPTERS[auth], http,
-                                   [row["link"], *row.get("link_alts", [])])
+                rec, url = _fetch_first(ADAPTERS[auth], http,
+                                        [row["link"], *row.get("link_alts", [])])
+                if row.get("link_repaired"):
+                    state.data.setdefault("resolved_links", {})[
+                        f"{auth}:{row['joint_id']}"] = url
                 # The receiving portal is the source of truth for the record's
                 # status: the register can run ahead of (or behind) the portal
                 # (seen live: DORA261 "Final" in the register, "Under Review"

@@ -313,7 +313,8 @@ def discover(session, act_substr: str, statuses, authorities,
             if cands:
                 print(f"[register] repaired link for {row['joint_id']} "
                       f"({row['authority']}): {cands[0]}", file=sys.stderr)
-                row = {**row, "link": cands[0], "link_alts": cands[1:]}
+                row = {**row, "link": cands[0], "link_alts": cands[1:],
+                       "link_repaired": True}
             else:
                 print(f"[register] WARNING: {row['joint_id']} "
                       f"({row['authority']}, status {row['status']!r}) has no "

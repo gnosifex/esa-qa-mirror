@@ -46,8 +46,12 @@ register_statuses:
 portal_statuses:
   # Detail-page wordings of a published answer — mirrored.
   # EBA "Final Q&A", ESMA "Answer Published", EIOPA "Final" (verified live
-  # 2026-11); "Revised" = a revised final answer (portal wording unverified).
-  final: ["Final", "Final Q&A", "Answer Published", "Revised"]
+  # 2026-11); "Revised" = a revised final answer (portal wording unverified);
+  # EIOPA marks EU-Commission answers "Answer provided by the European
+  # Commission" (seen live 2026-11-21: DORA099, DORA102, DORA237 — register
+  # "Final").
+  final: ["Final", "Final Q&A", "Answer Published", "Revised",
+          "Answer provided by the European Commission"]
   # Wordings of a known non-final state — held back as "pending" (not an
   # error), a mirrored copy is kept and marked x_portal_status.
   not_final: ["Under Review"]

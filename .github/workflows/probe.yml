@@ -114,7 +114,7 @@ jobs:
               print(f"    candidates: {cands}")
               if cands:
                   try:
-                      rec = cli._fetch_first(cli.ADAPTERS[r["authority"]], http, cands)
+                      rec, _ = cli._fetch_first(cli.ADAPTERS[r["authority"]], http, cands)
                       print(f"    FETCH OK -> qa_id={rec.qa_id!r} status={rec.status!r}")
                   except Exception as exc:
                       print(f"    FETCH FAILED: {exc}")
