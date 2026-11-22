@@ -177,13 +177,13 @@ def test_discover_repairs_rows_without_http_link(monkeypatch):
     picked = register.discover(object(), "DORA", {"Final", "Rejected"},
                                {"eba", "eiopa", "esma"})
     by_id = {r["joint_id"]: r for r in picked}
-    # EIOPA row: slug guessed in both orders (both exist live)
+    # EIOPA row: slug guessed in both orders, joint id hyphenated (current
+    # convention) first, then plain (all four exist live)
     a = by_id["DORA001"]
-    assert a["link"] == ("https://www.eiopa.europa.eu/qa-regulation/"
-                         "questions-and-answers-database/2622-dora001_en")
     base = "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database"
-    assert a["link_alts"] == [f"{base}/dora001-2622_en", f"{base}/2622-dora-001_en",
-                              f"{base}/dora-001-2622_en"]
+    assert a["link"] == f"{base}/dora-001-2622_en"
+    assert a["link_alts"] == [f"{base}/2622-dora-001_en", f"{base}/dora001-2622_en",
+                              f"{base}/2622-dora001_en"]
     # ESMA row: numeric native id is the whole detail path
     b = by_id["DORA002"]
     assert b["link"] == "https://www.esma.europa.eu/publications-data/questions-answers/2103"
@@ -206,12 +206,13 @@ def test_synth_links_per_authority():
     }) == [("https://www.eiopa.europa.eu/qa-regulation/"
             "questions-and-answers-database/2734-dora003_en")]
     # EIOPA bare native id → both orders, joint id with and without hyphen
-    # (DORA261 lives at dora-261-3416_en; the plain guesses 404)
+    # (DORA261 lives at dora-261-3416_en — the post-migration convention,
+    # guessed first so no 404 precedes it)
     base = "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database"
     assert register.synth_links({
         "authority": "eiopa", "native_id": "3416", "joint_id": "DORA261", "link": "",
-    }) == [f"{base}/3416-dora261_en", f"{base}/dora261-3416_en",
-           f"{base}/3416-dora-261_en", f"{base}/dora-261-3416_en"]
+    }) == [f"{base}/dora-261-3416_en", f"{base}/3416-dora-261_en",
+           f"{base}/dora261-3416_en", f"{base}/3416-dora261_en"]
     assert register.synth_links(
         {"authority": "esma", "native_id": "2103", "joint_id": "DORA050",
          "link": "-"},

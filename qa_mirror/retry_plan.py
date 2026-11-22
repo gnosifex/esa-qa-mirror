@@ -2,7 +2,7 @@
 
 The mirror workflow runs every authority once a day and schedules retry runs
 at other times of day. A retry repeats only the authorities whose most recent
-run (per runs.jsonl) ended with errors — so a temporarily failing source is
+run (per runs.jsonl) ended with errors or throttled fetches — so a temporarily failing source is
 retried the same day, without re-running the healthy ones.
 Prints the authorities space-separated (empty: nothing to retry).
 """
@@ -23,7 +23,9 @@ def failed_authorities(runs_path: Path) -> list[str]:
             totals = entry.get("totals") or {}
             for auth in entry.get("authorities") or []:
                 if auth in totals:
-                    latest[auth] = int(totals[auth].get("errors", 0))
+                    # throttled fetches are no error, but worth a same-day retry
+                    latest[auth] = (int(totals[auth].get("errors", 0))
+                                    + int(totals[auth].get("throttled", 0)))
     return sorted(a for a, errors in latest.items() if errors)
 
 

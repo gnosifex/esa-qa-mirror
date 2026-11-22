@@ -348,25 +348,95 @@ def test_authority_filter_restricts_rows(root, monkeypatch):
     assert not (root / "data" / "dora" / "eiopa-2622.md").exists()
 
 
-def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
-    # a repaired register row carries guessed candidates; the first one 404s,
-    # the alternate resolves — the record must be mirrored from the alternate
-    r = dict(row("DORA001", "eiopa", "2622"),
-             link="https://portal/eiopa/2622-dora001",
-             link_alts=["https://portal/eiopa/dora001-2622"])
-    monkeypatch.setattr(cli.register, "discover",
-                        lambda session, act, statuses, auths, ignore=None: [r])
+def http_error(code):
+    import requests
 
+    class R:
+        status_code = code
+    return requests.HTTPError(str(code), response=R())
+
+
+def repaired_row():
+    return dict(row("DORA261", "eiopa", "3416"),
+                link="https://portal/eiopa/3416-dora261",
+                link_alts=["https://portal/eiopa/dora261-3416",
+                           "https://portal/eiopa/dora-261-3416"])
+
+
+def guessing_portal(monkeypatch, calls, real="dora-261-3416", fail=404):
+    """Only `real` exists; every other guess fails with `fail`."""
     def fetch(http, url):
-        if url.endswith("2622-dora001"):
-            raise RuntimeError("404")
-        return Record(authority="eiopa", qa_id="2622", source_url=url,
-                      question="Q", answer="A")
+        calls.append(url.rsplit("/", 1)[-1])
+        if not url.endswith(real):
+            raise http_error(fail)
+        return Record(authority="eiopa", qa_id="DORA 261 - 3416", source_url=url,
+                      status="Final", question="Q", answer="A")
     monkeypatch.setattr(eiopa, "fetch_record", fetch)
 
+
+def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
+    # a repaired register row carries guessed candidates; the wrong ones 404,
+    # the last resolves — the record is mirrored from it
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls)
     assert run(root) == 0
-    text = (root / "data" / "dora" / "eiopa-2622.md").read_text()
-    assert "dora001-2622" in text  # the alternate is the recorded source
+    assert calls == ["3416-dora261", "dora261-3416", "dora-261-3416"]
+    text = (root / "data" / "dora" / "eiopa-dora-261-3416.md").read_text()
+    assert "dora-261-3416" in text  # the alternate is the recorded source
+
+
+def test_throttled_guess_stops_instead_of_trying_more(root, monkeypatch, capsys):
+    # a 429 that outlasted the retries says nothing about the guess — no
+    # further guesses into a throttling portal; error, no delisting
+    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
+    calls = []
+    guessing_portal(monkeypatch, calls, fail=429)
+    assert run(root) == 1  # nothing came through at all → red
+    assert calls == ["3416-dora261"]
+    assert "all 1 fetches throttled" in capsys.readouterr().err
+
+
+def test_partial_throttling_is_not_an_error(root, monkeypatch, capsys):
+    # one EIOPA page stays throttled, the rest come through: green run, the
+    # throttled record is counted, kept as is and not delisted
+    rows = [row("DORA001", "eiopa", "2622"), row("DORA002", "eiopa", "2623")]
+    install(monkeypatch, rows)
+    assert run(root) == 0
+    doc = root / "data" / "dora" / "eiopa-2623.md"
+    before = doc.read_text()
+
+    def fetch(http, url):
+        if url.endswith("2623"):
+            raise http_error(429)
+        return Record(authority="eiopa", qa_id="2622", source_url=url,
+                      question="Q?", answer="A.")
+    monkeypatch.setattr(eiopa, "fetch_record", fetch)
+    assert run(root, "--sweep") == 0
+    out = capsys.readouterr()
+    assert "throttled (429)" in out.err and "1 throttled, 0 errors" in out.out
+    assert doc.read_text() == before
+
+    # 2622 vanishes from the register during a fully throttled pass: red,
+    # and nothing is delisted (the pass is incomplete)
+    monkeypatch.setattr(cli.register, "discover", fake_discover([rows[1]]))
+    monkeypatch.setattr(eiopa, "fetch_record",
+                        lambda http, url: (_ for _ in ()).throw(http_error(429)))
+    assert run(root, "--sweep") == 1  # all throttled → red
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
+
+
+def test_retry_plan_retries_throttled_authorities(tmp_path):
+    import json
+
+    from qa_mirror import retry_plan
+    log = tmp_path / "runs.jsonl"
+    log.write_text("\n".join(json.dumps(x) for x in [
+        {"authorities": ["eiopa"], "totals": {"eiopa": {"errors": 0, "throttled": 2}}},
+        {"authorities": ["esma"], "totals": {"esma": {"errors": 0, "throttled": 0}}},
+        {"authorities": ["eba"], "totals": {"eba": {"errors": 0}}},  # old line
+    ]), encoding="utf-8")
+    assert retry_plan.failed_authorities(log) == ["eiopa"]
 
 
 def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypatch):

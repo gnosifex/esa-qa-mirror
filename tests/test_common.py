@@ -244,6 +244,21 @@ def test_retry_after_seconds(value, expected):
     assert _retry_after_seconds(value) == expected
 
 
+def test_http_host_delay_overrides_default(monkeypatch):
+    from qa_mirror import common as c
+    sleeps = []
+    h, _ = make_http([200, 200, 200], monkeypatch)
+    monkeypatch.setattr(c.time, "sleep", sleeps.append)
+    h.delay = 1.0
+    h.host_delays = {"slow.example": 5.0}
+    clock = iter([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    monkeypatch.setattr(c.time, "monotonic", lambda: next(clock))
+    h.get("https://slow.example/a")
+    h.get("https://slow.example/b")
+    h.get("https://fast.example/c")
+    assert sleeps == [5.0, 5.0, 1.0]
+
+
 def test_http_gives_up_after_retries(monkeypatch):
     import requests
     h, calls = make_http([503, 503, 503], monkeypatch)

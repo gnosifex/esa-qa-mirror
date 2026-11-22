@@ -39,10 +39,14 @@ class Http:
     _DIAG_HEADERS = ("server", "via", "x-cache", "cf-ray", "x-akamai-request-id",
                      "x-amz-cf-id", "x-iinfo", "retry-after", "date")
 
-    def __init__(self, delay: float = DEFAULT_DELAY, retries: int = 3):
+    def __init__(self, delay: float = DEFAULT_DELAY, retries: int = 3,
+                 host_delays: dict | None = None):
         self.session = requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.delay = delay
+        # per-host politeness delay overriding `delay` (config
+        # host_delay_seconds) — for portals that throttle sooner
+        self.host_delays = dict(host_delays or {})
         self.retries = retries
         self._last = 0.0
         self._diagnosed = set()  # hosts whose 403 was already diagnosed
@@ -72,7 +76,8 @@ class Http:
 
     def _get(self, url: str, **kw) -> requests.Response:
         for attempt in range(self.retries + 1):
-            wait = self.delay - (time.monotonic() - self._last)
+            host = url.split("/")[2] if "://" in url else ""
+            wait = self.host_delays.get(host, self.delay) - (time.monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
             try:

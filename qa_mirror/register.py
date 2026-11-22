@@ -263,12 +263,17 @@ def synth_links(row: dict) -> list[str]:
         if joint and joint in slug:
             return [f"{base}/{slug}_en"]
         if slug and joint:
+            # Order matters: every wrong guess is a 404, and EIOPA's CloudFront
+            # answers a burst of those with 429s for the whole host (seen live
+            # 2026-11-21). Post-migration slugs (native id >= ~3190) hyphenate
+            # the joint id and mostly put it first, and a repaired row is
+            # almost always a new Q&A — so the current convention goes first.
             joints = [joint]
             m = re.fullmatch(r"([a-z]+)(\d+)", joint)
             if m:
-                joints.append(f"{m.group(1)}-{m.group(2)}")
+                joints.insert(0, f"{m.group(1)}-{m.group(2)}")
             return [f"{base}/{s}_en"
-                    for j in joints for s in (f"{slug}-{j}", f"{j}-{slug}")]
+                    for j in joints for s in (f"{j}-{slug}", f"{slug}-{j}")]
     return []
 
 
