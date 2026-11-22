@@ -4,6 +4,11 @@
 # Register for joint acts, the EBA's own search for sectoral acts.
 
 delay_seconds: 1.5
+# Per-host override: EIOPA's CloudFront throttles (429) sooner than the other
+# portals (seen from GitHub runners since 2026-11-21); ~30 EIOPA Q&As make the
+# slower pace cheap.
+host_delay_seconds:
+  www.eiopa.europa.eu: 5
 
 # Incremental operation. Enumeration (register + EBA listing pages) runs in
 # full on EVERY run — presence/absence, delisting, archive resolution and the

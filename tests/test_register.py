@@ -184,7 +184,6 @@ def test_discover_repairs_rows_without_http_link(monkeypatch):
     assert a["link"] == f"{base}/dora-001-2622_en"
     assert a["link_alts"] == [f"{base}/2622-dora-001_en", f"{base}/dora001-2622_en",
                               f"{base}/2622-dora001_en"]
-    assert a["link_repaired"] is True
     # ESMA row: numeric native id is the whole detail path
     b = by_id["DORA002"]
     assert b["link"] == "https://www.esma.europa.eu/publications-data/questions-answers/2103"

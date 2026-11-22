@@ -360,8 +360,7 @@ def repaired_row():
     return dict(row("DORA261", "eiopa", "3416"),
                 link="https://portal/eiopa/3416-dora261",
                 link_alts=["https://portal/eiopa/dora261-3416",
-                           "https://portal/eiopa/dora-261-3416"],
-                link_repaired=True)
+                           "https://portal/eiopa/dora-261-3416"])
 
 
 def guessing_portal(monkeypatch, calls, real="dora-261-3416", fail=404):
@@ -387,45 +386,57 @@ def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
     assert "dora-261-3416" in text  # the alternate is the recorded source
 
 
-def test_resolved_link_is_remembered_and_tried_first(root, monkeypatch):
-    # the wrong guesses cost requests (and feed a portal's throttle): once a
-    # candidate resolved, later runs fetch it directly
-    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
-    calls = []
-    guessing_portal(monkeypatch, calls)
-    assert run(root) == 0
-    state = State(root / "state.json")
-    assert state.data["resolved_links"] == {
-        "eiopa:DORA261": "https://portal/eiopa/dora-261-3416"}
-    calls.clear()
-    assert run(root, "--sweep") == 0
-    assert calls == ["dora-261-3416"]
-
-
-def test_remembered_link_that_breaks_falls_back_to_guessing(root, monkeypatch):
-    monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
-    calls = []
-    guessing_portal(monkeypatch, calls)
-    assert run(root) == 0
-    # the portal moves the page to another of the candidate slugs
-    calls.clear()
-    guessing_portal(monkeypatch, calls, real="dora261-3416")
-    assert run(root, "--sweep") == 0
-    assert calls == ["dora-261-3416", "3416-dora261", "dora261-3416"]
-    assert State(root / "state.json").data["resolved_links"]["eiopa:DORA261"] \
-        == "https://portal/eiopa/dora261-3416"
-
-
 def test_throttled_guess_stops_instead_of_trying_more(root, monkeypatch, capsys):
     # a 429 that outlasted the retries says nothing about the guess — no
     # further guesses into a throttling portal; error, no delisting
     monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
     calls = []
     guessing_portal(monkeypatch, calls, fail=429)
-    assert run(root) == 1
+    assert run(root) == 1  # nothing came through at all → red
     assert calls == ["3416-dora261"]
-    assert "ERROR" in capsys.readouterr().err
-    assert "resolved_links" not in State(root / "state.json").data
+    assert "all 1 fetches throttled" in capsys.readouterr().err
+
+
+def test_partial_throttling_is_not_an_error(root, monkeypatch, capsys):
+    # one EIOPA page stays throttled, the rest come through: green run, the
+    # throttled record is counted, kept as is and not delisted
+    rows = [row("DORA001", "eiopa", "2622"), row("DORA002", "eiopa", "2623")]
+    install(monkeypatch, rows)
+    assert run(root) == 0
+    doc = root / "data" / "dora" / "eiopa-2623.md"
+    before = doc.read_text()
+
+    def fetch(http, url):
+        if url.endswith("2623"):
+            raise http_error(429)
+        return Record(authority="eiopa", qa_id="2622", source_url=url,
+                      question="Q?", answer="A.")
+    monkeypatch.setattr(eiopa, "fetch_record", fetch)
+    assert run(root, "--sweep") == 0
+    out = capsys.readouterr()
+    assert "throttled (429)" in out.err and "1 throttled, 0 errors" in out.out
+    assert doc.read_text() == before
+
+    # 2622 vanishes from the register during a fully throttled pass: red,
+    # and nothing is delisted (the pass is incomplete)
+    monkeypatch.setattr(cli.register, "discover", fake_discover([rows[1]]))
+    monkeypatch.setattr(eiopa, "fetch_record",
+                        lambda http, url: (_ for _ in ()).throw(http_error(429)))
+    assert run(root, "--sweep") == 1  # all throttled → red
+    assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
+
+
+def test_retry_plan_retries_throttled_authorities(tmp_path):
+    import json
+
+    from qa_mirror import retry_plan
+    log = tmp_path / "runs.jsonl"
+    log.write_text("\n".join(json.dumps(x) for x in [
+        {"authorities": ["eiopa"], "totals": {"eiopa": {"errors": 0, "throttled": 2}}},
+        {"authorities": ["esma"], "totals": {"esma": {"errors": 0, "throttled": 0}}},
+        {"authorities": ["eba"], "totals": {"eba": {"errors": 0}}},  # old line
+    ]), encoding="utf-8")
+    assert retry_plan.failed_authorities(log) == ["eiopa"]
 
 
 def test_unusable_register_link_is_error_and_suppresses_delisting(root, monkeypatch):
