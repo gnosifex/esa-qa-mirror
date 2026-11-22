@@ -7,7 +7,7 @@ legal_act_ref: "(EU) 2022/2554"
 legal_act_raw: "DORA - Regulation (EU) 2022/2554"
 article: "3(60-64)"
 topic: "Scope of group"
-status: "Final"
+status: "Answer provided by the European Commission"
 date_date_of_submission: "04 Jun 2024"
 date_date_of_submission_iso: "2024-06-04"
 date_publication_final_answer: "2026-04-10"
@@ -17,7 +17,7 @@ date_submission_to_esas_iso: "2024-06-04"
 x_answered_by: "European Commission"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/3100-dora099_en"
 license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
-retrieved_at: "2026-08-20T15:13:52+00:00"
+retrieved_at: "2026-11-22T20:30:04+00:00"
 ---
 
 # EIOPA Q&A 3100 - DORA099

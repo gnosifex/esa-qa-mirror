@@ -7,7 +7,7 @@ legal_act_ref: "(EU) 2022/2554"
 legal_act_raw: "DORA - Regulation (EU) 2022/2554"
 article: "2(3)(e)"
 topic: "Other DORA topics"
-status: "Final"
+status: "Answer provided by the European Commission"
 date_date_of_submission: "26 May 2025"
 date_date_of_submission_iso: "2025-05-26"
 date_publication_final_answer: "2025-12-17"
@@ -17,7 +17,7 @@ date_submission_to_esas_iso: "2025-05-26"
 x_answered_by: "European Commission"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/dora237-3350_en"
 license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
-retrieved_at: "2026-08-20T15:15:02+00:00"
+retrieved_at: "2026-11-22T20:30:15+00:00"
 ---
 
 # EIOPA Q&A DORA237 - 3350
