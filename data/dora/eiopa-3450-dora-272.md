@@ -10,12 +10,14 @@ topic: "ICT risk management (DORA)"
 status: "Final"
 date_date_of_submission: "03 Nov 2025"
 date_date_of_submission_iso: "2025-11-03"
+date_publication_final_answer: "2026-01-01"
+date_publication_final_answer_iso: "2026-01-01"
 date_submission_to_esas: "2025-11-03"
 date_submission_to_esas_iso: "2025-11-03"
 x_answered_by: "EIOPA"
 source_url: "https://www.eiopa.europa.eu/qa-regulation/questions-and-answers-database/3450-dora-272_en"
 license: "© EIOPA — reuse subject to https://www.eiopa.europa.eu/legal-notice_en"
-retrieved_at: "2026-08-20T15:15:22+00:00"
+retrieved_at: "2026-11-21T20:24:56+00:00"
 ---
 
 # EIOPA Q&A 3450 - DORA 272
