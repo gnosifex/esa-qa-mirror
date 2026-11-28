@@ -388,13 +388,28 @@ def test_repaired_link_falls_through_to_working_alternate(root, monkeypatch):
 
 def test_throttled_guess_stops_instead_of_trying_more(root, monkeypatch, capsys):
     # a 429 that outlasted the retries says nothing about the guess — no
-    # further guesses into a throttling portal; error, no delisting
+    # further guesses into a throttling portal
     monkeypatch.setattr(cli.register, "discover", fake_discover([repaired_row()]))
     calls = []
     guessing_portal(monkeypatch, calls, fail=429)
-    assert run(root) == 1  # nothing came through at all → red
+    # the run's only fetch throttled: no outage signal (seen live: a lone
+    # pending DORA261 re-check turned 4 runs red) → green, counted
+    assert run(root) == 0
     assert calls == ["3416-dora261"]
-    assert "all 1 fetches throttled" in capsys.readouterr().err
+    out = capsys.readouterr()
+    assert "1 throttled, 0 errors" in out.out and "nothing came through" not in out.err
+
+
+def test_all_throttled_is_an_error_from_three_fetches(root, monkeypatch, capsys):
+    rows = [row(f"DORA00{i}", "eiopa", str(2620 + i)) for i in range(3)]
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows))
+    monkeypatch.setattr(eiopa, "fetch_record",
+                        lambda http, url: (_ for _ in ()).throw(http_error(429)))
+    assert run(root) == 1
+    assert "all 3 fetches throttled" in capsys.readouterr().err
+    # two of them: still below the threshold
+    monkeypatch.setattr(cli.register, "discover", fake_discover(rows[:2]))
+    assert run(root) == 0
 
 
 def test_partial_throttling_is_not_an_error(root, monkeypatch, capsys):
@@ -417,12 +432,12 @@ def test_partial_throttling_is_not_an_error(root, monkeypatch, capsys):
     assert "throttled (429)" in out.err and "1 throttled, 0 errors" in out.out
     assert doc.read_text() == before
 
-    # 2622 vanishes from the register during a fully throttled pass: red,
-    # and nothing is delisted (the pass is incomplete)
+    # 2622 vanishes from the register during a fully throttled pass: nothing
+    # is delisted (the pass is incomplete)
     monkeypatch.setattr(cli.register, "discover", fake_discover([rows[1]]))
     monkeypatch.setattr(eiopa, "fetch_record",
                         lambda http, url: (_ for _ in ()).throw(http_error(429)))
-    assert run(root, "--sweep") == 1  # all throttled → red
+    assert run(root, "--sweep") == 0  # a single throttled fetch: no outage
     assert "x_delisted" not in (root / "data" / "dora" / "eiopa-2622.md").read_text()
 
 

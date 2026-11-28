@@ -215,6 +215,10 @@ def _fetch_first(adapter, http, urls):
     return adapter.fetch_record(http, urls[-1])
 
 
+# Fewest throttled fetches (with none coming through) that count as an outage.
+ALL_THROTTLED_MIN = 3
+
+
 def _is_throttled(exc: Exception) -> bool:
     return (isinstance(exc, requests.HTTPError)
             and getattr(exc.response, "status_code", None) == 429)
@@ -587,9 +591,12 @@ def main(argv=None) -> int:
 
     for auth in sorted(sel):
         t = totals[auth]
-        if t["throttled"] and not t["checked"]:
+        if t["throttled"] >= ALL_THROTTLED_MIN and not t["checked"]:
             # nothing of this authority came through: no longer a passing
-            # throttle but an outage (or a block) — fail visibly
+            # throttle but an outage (or a block) — fail visibly. Needs a few
+            # fetches to mean anything: an incremental EIOPA run often fetches
+            # just one record (a pending one), and one throttled fetch is no
+            # outage (it turned 4 runs red in 2026-11).
             print(f"[{auth}] ERROR: all {t['throttled']} fetches throttled (429) "
                   "— nothing came through", file=sys.stderr)
             t["errors"] += 1
